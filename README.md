@@ -39,3 +39,5 @@ chip pins
 esptool.py erase_flash
 esptool.py --baud 460800 write_flash 0 ESP32_BOARD_NAME-DATE-VERSION.bin
 ```
+
+Now, put RNS in /libraries, heltec_offline.py & test/demo_data.py in /. run it with "import heltec_offline" in REPL, you should see output on screen.
