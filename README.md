@@ -9,7 +9,7 @@ You can just not use that stuff, but eventuallly I will strip it all out. For no
 
 ## how to use this on Heltec v3
 
-I started with a Heltec v3. It should work on great other things, but that is what I had on-hand that already had a lora radio attached, for testing.
+I started with a Heltec v3. It should work great on other things, but that is what I had on-hand that already had a lora radio attached, for testing.
 
 ### hardware
 
