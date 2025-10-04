@@ -1,10 +1,14 @@
 # this example will parse & decrypt captured traffic
+# put it in FS root, along with test/demo_data.py
 
-# mess with path to get local files
-import os
-import sys
-script_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(script_dir, '..'))
+# detect micropython
+try:
+    import machine
+except:
+  import os
+  import sys
+  script_dir = os.path.dirname(os.path.abspath(__file__))
+  sys.path.insert(0, os.path.join(script_dir, '..'))
 
 from test import demo_data
 import RNS
