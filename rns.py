@@ -5,6 +5,8 @@ import sys
 from os import urandom
 import hashlib
 
+TRUNCATED_HASHLENGTH = 128
+
 # micropython has simpler/different hashing & crypto stuff, so we abstract the basic helpers
 if sys.implementation.name == "micropython":
     from cryptolib import aes
