@@ -6,37 +6,38 @@ from os import urandom
 import hashlib
 
 # micropython has simpler/different hashing & crypto stuff, so we abstract the basic helpers
-if sys.implementation.name == 'micropython':
+if sys.implementation.name == "micropython":
     from cryptolib import aes
-    
+
     # HMAC-SHA256 implementation for MicroPython
     def _getHmac(sign_key, data):
         # Standard HMAC construction per RFC 2104
         block_size = 64  # SHA256 block size
-        
+
         # Adjust key length
         if len(sign_key) > block_size:
             sign_key = hashlib.sha256(sign_key).digest()
         if len(sign_key) < block_size:
-            sign_key = sign_key + b'\x00' * (block_size - len(sign_key))
-        
+            sign_key = sign_key + b"\x00" * (block_size - len(sign_key))
+
         # Create inner and outer padding
         o_key_pad = bytes(b ^ 0x5C for b in sign_key)
         i_key_pad = bytes(b ^ 0x36 for b in sign_key)
-        
+
         # HMAC = H(o_key_pad || H(i_key_pad || message))
         inner_hash = hashlib.sha256(i_key_pad + data).digest()
         return hashlib.sha256(o_key_pad + inner_hash).digest()
-    
+
     # AES-CBC encrypt for MicroPython
     def _aesCbcEncrypt(encrypt_key, iv, plaintext):
         cipher = aes(encrypt_key, 2, iv)  # mode 2 = CBC
         return cipher.encrypt(plaintext)
-    
+
     # AES-CBC decrypt for MicroPython
     def _aesCbcDecrypt(encrypt_key, iv, ciphertext):
         cipher = aes(encrypt_key, 2, iv)  # mode 2 = CBC
         return cipher.decrypt(ciphertext)
+
 else:
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
     import hmac
@@ -59,81 +60,130 @@ else:
 
 
 def _PKCS7_unpad(data, bs=16):
-  l = len(data)
-  n = data[-1]
-  if n > bs:
-    raise ValueError(f"Cannot unpad, invalid padding length of {n} bytes")
-  else:
-    return data[:l-n]
+    l = len(data)
+    n = data[-1]
+    if n > bs:
+        raise ValueError(f"Cannot unpad, invalid padding length of {n} bytes")
+    else:
+        return data[: l - n]
+
 
 def _PKCS7_pad(data, bs=16):
-  l = len(data)
-  n = bs-l%bs
-  v = bytes([n])
-  return data+v*n
+    l = len(data)
+    n = bs - l % bs
+    v = bytes([n])
+    return data + v * n
+
 
 def _split_key(identity=None):
-  """
-  An identity is 2 private-keys: 16/32 byte-length
-  This helper will split that into: sign_key, encrypt_key
-  """
-  if not isinstance(identity, bytes): raise ValueError("Identity must be bytes")
-  if len(identity) != 32 and len(identity) != 64:
-    raise ValueError(f"Identity must be 128 or 256 bits, not {len(identity)*8}")
-  midpoint = len(identity) // 2
-  return (identity[:midpoint], identity[midpoint:])
+    """
+    An identity is 2 private-keys: 16/32 byte-length
+    This helper will split that into: sign_key, encrypt_key
+    """
+    if not isinstance(identity, bytes):
+        raise ValueError("Identity must be bytes")
+    if len(identity) != 32 and len(identity) != 64:
+        raise ValueError(f"Identity must be 128 or 256 bits, not {len(identity)*8}")
+    midpoint = len(identity) // 2
+    return (identity[:midpoint], identity[midpoint:])
+
 
 def token_verify(sign_key, token):
-  """
-  HMAC verify token-signature
-  """
-  if not isinstance(token, bytes): raise TypeError("Token must be bytes")
-  return token[-32:] == _getHmac(sign_key, token[:-32])
-
-def token_decrypt(identity, token = None):
-  """
-  AES decrypt a token
-  """
-  (sign_key, encrypt_key) = _split_key(identity)
-  if not token_verify(sign_key, token): raise ValueError("Token HMAC was invalid")
-  iv = token[:16]
-  plaintext = _aesCbcDecrypt(encrypt_key, iv, token[16:-32])
-  return _PKCS7_unpad(plaintext)
-
-def token_encrypt(identity, data = None):
-  """
-  AES encrypt a token
-  """
-  (sign_key, encrypt_key) = _split_key(identity)
-  if not isinstance(data, bytes): raise TypeError("Token must be bytes")
-  iv = urandom(16)
-  ciphertext = _aesCbcEncrypt(encrypt_key, iv, _PKCS7_pad(data))
-  signed_parts = iv + ciphertext
-  return signed_parts + _getHmac(sign_key, signed_parts)
+    """
+    HMAC verify token-signature
+    """
+    if not isinstance(token, bytes):
+        raise TypeError("Token must be bytes")
+    return token[-32:] == _getHmac(sign_key, token[:-32])
 
 
+def token_decrypt(identity, token=None):
+    """
+    AES decrypt a token
+    """
+    (sign_key, encrypt_key) = _split_key(identity)
+    if not token_verify(sign_key, token):
+        raise ValueError("Token HMAC was invalid")
+    iv = token[:16]
+    plaintext = _aesCbcDecrypt(encrypt_key, iv, token[16:-32])
+    return _PKCS7_unpad(plaintext)
 
-def decode_packet(bytes):
-  """
-  Decode main parts of a reticulum packet, returns packet dict
-  """
-  pass
+
+def token_encrypt(identity, data=None):
+    """
+    AES encrypt a token
+    """
+    (sign_key, encrypt_key) = _split_key(identity)
+    if not isinstance(data, bytes):
+        raise TypeError("Token must be bytes")
+    iv = urandom(16)
+    ciphertext = _aesCbcEncrypt(encrypt_key, iv, _PKCS7_pad(data))
+    signed_parts = iv + ciphertext
+    return signed_parts + _getHmac(sign_key, signed_parts)
+
+
+def decode_packet(packet_bytes):
+    if len(packet_bytes) < 2:
+        return None
+    result = {}
+    header1 = packet_bytes[0]
+    result["ifac_flag"] = bool(header1 & 0b10000000)
+    result["header_type"] = bool(header1 & 0b01000000)
+    result["context_flag"] = bool(header1 & 0b00100000)
+    result["propagation_type"] = bool(header1 & 0b00010000)
+    result["destination_type"] = header1 & 0b00001100
+    result["packet_type"] = header1 & 0b00000011
+    result["hops"] = packet_bytes[1]
+    offset = 2
+
+    # Skip IFAC if present (implementation specific) – not parsed here
+    if result["ifac_flag"]:
+        result["has_ifac"] = True
+        # If IFAC exists in this capture, you must know its length to skip correctly.
+
+    addr_count = 2 if result["header_type"] else 1
+    addr_size = TRUNCATED_HASHLENGTH * addr_count
+    if len(packet_bytes) < offset + addr_size:
+        return None
+
+    result["destination_hash"] = packet_bytes[offset : offset + TRUNCATED_HASHLENGTH]
+    offset += TRUNCATED_HASHLENGTH
+
+    if result["header_type"]:
+        result["source_hash"] = packet_bytes[offset : offset + TRUNCATED_HASHLENGTH]
+        offset += TRUNCATED_HASHLENGTH
+    else:
+        result["source_hash"] = None
+
+    if result["context_flag"]:
+        if len(packet_bytes) < offset + 1:
+            return None
+        result["context"] = packet_bytes[offset]
+        offset += 1
+    else:
+        result["context"] = None
+
+    result["data"] = packet_bytes[offset:]
+    result["raw"] = packet_bytes
+    return result
+
 
 def decode_announce(packet):
-  """
-  Decode an ANNOUNCE packet (output from decode_packet)
-  """
-  pass
+    """
+    Decode an ANNOUNCE packet (output from decode_packet)
+    """
+    pass
+
 
 def decode_data(packet, receiverIdentity, ratchets=[]):
-  """
-  Decode & decrypt a DATA packet (output from decode_packet)
-  """
-  pass
+    """
+    Decode & decrypt a DATA packet (output from decode_packet)
+    """
+    pass
+
 
 def encode_data(packet, whatever):
-  """
-  Encrypt & encode a DATA packet
-  """
-  pass
-
+    """
+    Encrypt & encode a DATA packet
+    """
+    pass
