@@ -116,7 +116,7 @@ def decode_packet(packet_bytes):
     result["packet_type"] = header1 & 0b00000011
     result["hops"] = packet_bytes[1]
     offset = 2
-    
+
     addr_count = 2 if result["header_type"] else 1
     addr_size = TRUNCATED_HASHLENGTH * addr_count
     if len(packet_bytes) < offset + addr_size:
@@ -153,13 +153,7 @@ def decode_announce(packet):
 
 def decode_data(packet, receiverIdentity, ratchets=[]):
     """
-    Decode & decrypt a DATA packet (output from decode_packet)
+    Decrypt a DATA packet (output from decode_packet)
     """
     pass
 
-
-def encode_data(packet, whatever):
-    """
-    Encrypt & encode a DATA packet
-    """
-    pass

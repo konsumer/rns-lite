@@ -2,9 +2,9 @@ This is a light implementation of reticulum, based on the [official python libra
 
 This is a light "BYO" version that is compatable, but missing transport, interfaces, packet-callbacks, and file-use.
 
-The essential idea is that is has utilities for the basics, but no automatic-management of things, and much smaller/simpler. The hope is that it will be usable in constrained enviroments, like micropython.
+The essential idea is that is has utilities for the basics, but no automatic-management of things, and much smaller/simpler. The hope is that it will be usable in constrained enviroments, like micropython. I am also working on [cyd-nomad](https://github.com/konsumer/cyd-nomad), for this purpose.
 
-## how to use this on Heltec v3
+## Heltec v3
 
 I started with a Heltec v3. It should work great on other things, but that is what I had on-hand that already had a lora radio attached, for testing.
 
@@ -33,6 +33,18 @@ chip pins
 - onboard LED GPIO = 35
 
 - load [esp32-s3 image](https://micropython.org/download/ESP32_GENERIC_S3/)
+
+
+When working with python, I have a global venv I automatically activate in my .zshrc. For most "regular things" I like to just keep it all in one place, and it makes it easier to find the source for libraries & tools. It's also easier to wipe it all, and it keeps the version locked into a single root (on mac, for example, you might have several python runtimes.)
+
+```sh
+# make a fresh venv
+python3 -m venv ~/.venv-global
+
+# activate. put this in your shell-config
+source  ~/.venv-global/bin/activate
+```
+
 
 ```sh
 # install ESP32 CLI tools
@@ -76,7 +88,9 @@ On mac/linux, I like to use picocom for my serial-terminal:
 picocom -b115200 /dev/tty.usbserial-0001
 ```
 
-You can close it with Ctrl-A, Ctrl-X. Now run an example:
+You can close it with Ctrl-A, Ctrl-X. Any serial program will work (`screen` is also very popular) set baude to 115200.
+
+Now run an example:
 
 ```py
 import example_heltec_offline
