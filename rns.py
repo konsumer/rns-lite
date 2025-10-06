@@ -12,7 +12,7 @@ if sys.implementation.name == "micropython":
     from cryptolib import aes
 
     # HMAC-SHA256 implementation for MicroPython
-    def _getHmac(sign_key, data):
+    def _hmac_sha256(sign_key, data):
         # Standard HMAC construction per RFC 2104
         block_size = 64  # SHA256 block size
 
@@ -45,7 +45,7 @@ else:
     import hmac
 
     # wrapped HMAC computation
-    def _getHmac(sign_key, data):
+    def _hmac_sha256(sign_key, data):
         return hmac.new(sign_key, data, hashlib.sha256).digest()
 
     # wrapped AES CBC encrypt
@@ -59,6 +59,35 @@ else:
         cipher = Cipher(algorithms.AES(encrypt_key), modes.CBC(iv))
         decryptor = cipher.decryptor()
         return decryptor.update(ciphertext) + decryptor.finalize()
+
+
+def _hkdf(length=None, derive_from=None, salt=None, context=None):
+    hash_len = 32
+
+    if length == None or length < 1:
+        raise ValueError("Invalid output key length")
+
+    if derive_from == None or derive_from == "":
+        raise ValueError("Cannot derive key from empty input material")
+
+    if salt == None or len(salt) == 0:
+        salt = bytes([0] * hash_len)
+
+    if context == None:
+        context = b""
+
+    pseudorandom_key = _hmac_sha256(salt, derive_from)
+
+    block = b""
+    derived = b""
+
+    for i in range(ceil(length / hash_len)):
+        block = _hmac_sha256(
+            pseudorandom_key, block + context + bytes([(i + 1) % (0xFF + 1)])
+        )
+        derived += block
+
+    return derived[:length]
 
 
 def _PKCS7_unpad(data, bs=16):
@@ -96,7 +125,7 @@ def token_verify(sign_key, token):
     """
     if not isinstance(token, bytes):
         raise TypeError("Token must be bytes")
-    return token[-32:] == _getHmac(sign_key, token[:-32])
+    return token[-32:] == _hmac_sha256(sign_key, token[:-32])
 
 
 def token_decrypt(identity, token=None):
@@ -121,7 +150,7 @@ def token_encrypt(identity, data=None):
     iv = urandom(16)
     ciphertext = _aesCbcEncrypt(encrypt_key, iv, _PKCS7_pad(data))
     signed_parts = iv + ciphertext
-    return signed_parts + _getHmac(sign_key, signed_parts)
+    return signed_parts + _hmac_sha256(sign_key, signed_parts)
 
 
 def decode_packet(packet_bytes):
