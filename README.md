@@ -64,6 +64,10 @@ pip install adafruit-ampy
 # upload rns-lite
 ampy --port /dev/tty.usbserial-0001 put rns.py
 
+# these might eventually be replaced with faster versions, but these are pure-python crypto things
+ampy --port /dev/tty.usbserial-0001 put x25519
+ampy --port /dev/tty.usbserial-0001 put ed25519.py
+
 # upload test programs
 ampy --port /dev/tty.usbserial-0001 put example_heltec_offline.py
 

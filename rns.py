@@ -9,6 +9,20 @@ import hashlib
 if sys.implementation.name == "micropython":
     from cryptolib import aes
 
+    # pypi
+    import x25519
+
+    # https://ed25519.cr.yp.to/python/ed25519.py
+    import ed25519
+
+    # this is slower, but works in micropython
+    def get_identity_public(private_identity_bytes):
+        encryption_private = private_identity_bytes[:32]
+        signing_private = private_identity_bytes[32:64]
+        encryption_public = x25519.scalar_base_mult(encryption_private)
+        signing_public = ed25519.publickey(signing_private)
+        return encryption_public + signing_public
+
     # HMAC-SHA256 implementation for MicroPython
     def _hmac_sha256(sign_key, data):
         # Standard HMAC construction per RFC 2104
@@ -42,6 +56,25 @@ else:
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
     import hmac
 
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+    from cryptography.hazmat.primitives import serialization
+
+    def get_identity_public(private_identity_bytes):
+        encryption_private = private_identity_bytes[:32]
+        signing_private = private_identity_bytes[32:64]
+        encrypt_key = X25519PrivateKey.from_private_bytes(encryption_private)
+        encryption_public = encrypt_key.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw
+        )
+        sign_key = Ed25519PrivateKey.from_private_bytes(signing_private)
+        signing_public = sign_key.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw
+        )
+        return encryption_public + signing_public
+
     # wrapped HMAC computation
     def _hmac_sha256(sign_key, data):
         return hmac.new(sign_key, data, hashlib.sha256).digest()
@@ -58,6 +91,13 @@ else:
         decryptor = cipher.decryptor()
         return decryptor.update(ciphertext) + decryptor.finalize()
 
+# wrapped SHA256 hash
+def _sha256(data):
+    return hashlib.sha256(data).digest()
+
+# wrapped SHA512 hash
+def _sha512(data):
+    return hashlib.sha512(data).digest()
 
 def _hkdf(length=None, derive_from=None, salt=None, context=None):
     hash_len = 32
@@ -103,6 +143,17 @@ def _PKCS7_pad(data, bs=16):
     v = bytes([n])
     return data + v * n
 
+def get_destination_hash(public_identity_bytes, app_name, *aspects):
+    identity_hash = _sha256(public_identity_bytes)[:16]
+    full_name = app_name
+    for aspect in aspects:
+        full_name += "." + aspect
+    name_hash = _sha256(full_name.encode("utf-8"))[:10]
+    addr_hash_material = name_hash + identity_hash
+    destination_hash = _sha256(addr_hash_material)[:16]
+    return destination_hash
+
+
 def decode_packet(packet_bytes):
     result = {}
     header1 = packet_bytes[0]
@@ -136,18 +187,3 @@ def decode_packet(packet_bytes):
     result["data"] = packet_bytes[offset:]
     result["raw"] = packet_bytes
     return result
-
-
-def decode_announce(packet):
-    """
-    Decode an ANNOUNCE packet (output from decode_packet)
-    """
-    pass
-
-
-def decode_data(packet, receiverIdentity, ratchets=[]):
-    """
-    Decrypt a DATA packet (output from decode_packet)
-    """
-    pass
-
