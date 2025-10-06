@@ -5,8 +5,6 @@ import sys
 from os import urandom
 import hashlib
 
-TRUNCATED_HASHLENGTH = 128
-
 # micropython has simpler/different hashing & crypto stuff, so we abstract the basic helpers
 if sys.implementation.name == "micropython":
     from cryptolib import aes
@@ -118,16 +116,16 @@ def decode_packet(packet_bytes):
     offset = 2
 
     addr_count = 2 if result["header_type"] else 1
-    addr_size = TRUNCATED_HASHLENGTH * addr_count
+    addr_size = 16 * addr_count
     if len(packet_bytes) < offset + addr_size:
         return None
 
-    result["destination_hash"] = packet_bytes[offset : offset + TRUNCATED_HASHLENGTH]
-    offset += TRUNCATED_HASHLENGTH
+    result["destination_hash"] = packet_bytes[offset : offset + 16]
+    offset += 16
 
     if result["header_type"]:
-        result["source_hash"] = packet_bytes[offset : offset + TRUNCATED_HASHLENGTH]
-        offset += TRUNCATED_HASHLENGTH
+        result["source_hash"] = packet_bytes[offset : offset + 16]
+        offset += 16
     else:
         result["source_hash"] = None
 

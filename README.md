@@ -90,7 +90,7 @@ picocom -b115200 /dev/tty.usbserial-0001
 
 You can close it with Ctrl-A, Ctrl-X. Any serial program will work (`screen` is also very popular) set baude to 115200.
 
-Now run an example:
+Now run an example, on ESP32:
 
 ```py
 import example_heltec_offline
