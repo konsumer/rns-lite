@@ -117,8 +117,6 @@ def decode_packet(packet_bytes):
 
     addr_count = 2 if result["header_type"] else 1
     addr_size = 16 * addr_count
-    if len(packet_bytes) < offset + addr_size:
-        return None
 
     result["destination_hash"] = packet_bytes[offset : offset + 16]
     offset += 16
@@ -130,8 +128,6 @@ def decode_packet(packet_bytes):
         result["source_hash"] = None
 
     if result["context_flag"]:
-        if len(packet_bytes) < offset + 1:
-            return None
         result["context"] = packet_bytes[offset]
         offset += 1
     else:
