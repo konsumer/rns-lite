@@ -115,19 +115,22 @@ def test_rns():
         packet = rns.decode_packet(packetBytes)
         
         # validate ANNOUNCE
-        if packet['packet_type'] == RNS.Packet.ANNOUNCE:
+        if packet['packet_type'] == rns.PACKET_ANNOUNCE:
             print(f"  ANNOUNCE to {packet['destination_hash'].hex()}")
-            # TODO: rns.announce_validate(packet)
-            # TODO: rns.announce_get_ratchet(packet, identity_private) - get ratchet private key - maybe needs identity_public
+            if rns.announce_validate(packet):
+                print("    Valid: Yes")
+            else:
+                print("    Valid: No")
+
 
         # decrypt DATA
-        if packet['packet_type'] == RNS.Packet.DATA:
+        if packet['packet_type'] == rns.PACKET_DATA:
             print(f"  DATA to {packet['destination_hash'].hex()}")
             # TODO: rns.get_packet_hash(packet) for message-id (shows up in PROOF destination, so we need to map that to peer pubkey, in a dict)
             # TODO: rns.data_decrypt(packet, identity_private, ratchets) - maybe needs identity_public
 
         # validate PROOF
-        if packet['packet_type'] == RNS.Packet.PROOF:
+        if packet['packet_type'] == rns.PACKET_PROOF:
             print(f"  PROOF for {packet['destination_hash'].hex()}")
             # TODO: rns.proof_validate(packet)
             

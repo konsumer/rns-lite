@@ -5,6 +5,35 @@ import sys
 from os import urandom
 import hashlib
 
+PACKET_DATA         = 0x00     # Data packets
+PACKET_ANNOUNCE     = 0x01     # Announces
+PACKET_LINKREQUEST  = 0x02     # Link requests
+PACKET_PROOF        = 0x03     # Proofs
+
+
+CONTEXT_NONE           = 0x00   # Generic data packet
+CONTEXT_RESOURCE       = 0x01   # Packet is part of a resource
+CONTEXT_RESOURCE_ADV   = 0x02   # Packet is a resource advertisement
+CONTEXT_RESOURCE_REQ   = 0x03   # Packet is a resource part request
+CONTEXT_RESOURCE_HMU   = 0x04   # Packet is a resource hashmap update
+CONTEXT_RESOURCE_PRF   = 0x05   # Packet is a resource proof
+CONTEXT_RESOURCE_ICL   = 0x06   # Packet is a resource initiator cancel message
+CONTEXT_RESOURCE_RCL   = 0x07   # Packet is a resource receiver cancel message
+CONTEXT_CACHE_REQUEST  = 0x08   # Packet is a cache request
+CONTEXT_REQUEST        = 0x09   # Packet is a request
+CONTEXT_RESPONSE       = 0x0A   # Packet is a response to a request
+CONTEXT_PATH_RESPONSE  = 0x0B   # Packet is a response to a path request
+CONTEXT_COMMAND        = 0x0C   # Packet is a command
+CONTEXT_COMMAND_STATUS = 0x0D   # Packet is a status of an executed command
+CONTEXT_CHANNEL        = 0x0E   # Packet contains link channel data
+CONTEXT_KEEPALIVE      = 0xFA   # Packet is a keepalive packet
+CONTEXT_LINKIDENTIFY   = 0xFB   # Packet is a link peer identification proof
+CONTEXT_LINKCLOSE      = 0xFC   # Packet is a link close message
+CONTEXT_LINKPROOF      = 0xFD   # Packet is a link packet proof
+CONTEXT_LRRTT          = 0xFE   # Packet is a link request round-trip time measurement
+CONTEXT_LRPROOF        = 0xFF   # Packet is a link request proof
+
+
 # micropython has simpler/different hashing & crypto stuff, so we abstract the basic helpers
 if sys.implementation.name == "micropython":
     from cryptolib import aes
@@ -51,6 +80,14 @@ if sys.implementation.name == "micropython":
     def _aesCbcDecrypt(encrypt_key, iv, ciphertext):
         cipher = aes(encrypt_key, 2, iv)  # mode 2 = CBC
         return cipher.decrypt(ciphertext)
+
+    # Wrapper for ed25519 signature verification.
+    def _ed25519_checkvalid(signature, message, public_key):
+        try:
+            ed25519.checkvalid(signature, message, public_key)
+            return True
+        except Exception as e:
+            return False
 
 else:
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -99,6 +136,7 @@ def _sha256(data):
 def _sha512(data):
     return hashlib.sha512(data).digest()
 
+# wrapped HKDF
 def _hkdf(length=None, derive_from=None, salt=None, context=None):
     hash_len = 32
 
@@ -156,13 +194,12 @@ def get_destination_hash(public_identity_bytes, app_name, *aspects):
 
 def decode_packet(packet_bytes):
     result = {}
-    header1 = packet_bytes[0]
-    result["ifac_flag"] = bool(header1 & 0b10000000)
-    result["header_type"] = bool(header1 & 0b01000000)
-    result["context_flag"] = bool(header1 & 0b00100000)
-    result["propagation_type"] = bool(header1 & 0b00010000)
-    result["destination_type"] = header1 & 0b00001100
-    result["packet_type"] = header1 & 0b00000011
+    result["ifac_flag"] = bool(packet_bytes[0] & 0b10000000)
+    result["header_type"] = bool(packet_bytes[0] & 0b01000000)
+    result["context_flag"] = bool(packet_bytes[0] & 0b00100000)
+    result["propagation_type"] = bool(packet_bytes[0] & 0b00010000)
+    result["destination_type"] = packet_bytes[0] & 0b00001100
+    result["packet_type"] = packet_bytes[0] & 0b00000011
     result["hops"] = packet_bytes[1]
     offset = 2
 
@@ -187,3 +224,78 @@ def decode_packet(packet_bytes):
     result["data"] = packet_bytes[offset:]
     result["raw"] = packet_bytes
     return result
+
+def announce_validate(packet):
+    """
+    Validate an ANNOUNCE packet.
+    """
+    data = packet['data']
+    dest_hash = packet['destination_hash']
+    
+    print(f"    Data length: {len(data)}")
+    print(f"    Dest hash: {dest_hash.hex()}")
+    
+    # Search for where the identity hash might be
+    print(f"    Searching for identity in data...")
+    if dest_hash in data:
+        pos = data.index(dest_hash)
+        print(f"    Found dest_hash at position: {pos}")
+    
+    # The signature is always the last 64 bytes
+    signature = data[-64:]
+    
+    # Try different offsets for the crypto material
+    # Maybe it's not 148 bytes from the end?
+    
+    # Let's try: the public key might be at the START (after app_data length prefix?)
+    # Or maybe the structure includes the destination hash in the data?
+    
+    # Parse the first 16 bytes - could be the destination hash
+    possible_dest = data[:16]
+    print(f"    First 16 bytes: {possible_dest.hex()}")
+    
+    if possible_dest == dest_hash:
+        print(f"    Destination hash is at start of data!")
+        # Structure: dest_hash (16) + public_key (64) + name_hash (10) + random_hash (10) + app_data (?) + signature (64)
+        public_key = data[16:80]
+        name_hash = data[80:90]
+        random_hash = data[90:100]
+        app_data = data[100:-64]
+        signature = data[-64:]
+    else:
+        # Try: public_key at start
+        public_key = data[:64]
+        name_hash = data[64:74]
+        random_hash = data[74:84]
+        app_data = data[84:-64]
+        signature = data[-64:]
+    
+    print(f"    Public key: {public_key.hex()}")
+    
+    # Try both key orders
+    identity_hash_1 = _sha256(public_key)[:16]
+    identity_hash_2 = _sha256(public_key[32:] + public_key[:32])[:16]  # swapped
+    
+    print(f"    Identity (enc+sign): {identity_hash_1.hex()}")
+    print(f"    Identity (sign+enc): {identity_hash_2.hex()}")
+    
+    if identity_hash_1 == dest_hash:
+        print(f"    Match with enc+sign order")
+        identity_hash = identity_hash_1
+        signing_public_key = public_key[32:64]
+    elif identity_hash_2 == dest_hash:
+        print(f"    Match with sign+enc order")
+        identity_hash = identity_hash_2
+        signing_public_key = public_key[:32]
+    else:
+        print(f"    No identity match found")
+        return False
+    
+    # Construct signed data
+    signed_data = dest_hash + public_key + name_hash + random_hash + app_data
+    
+    result = _ed25519_checkvalid(signature, signed_data, signing_public_key)
+    print(f"    Signature validation: {result}")
+    
+    return result
+
