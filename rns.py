@@ -105,57 +105,7 @@ def _PKCS7_pad(data, bs=16):
     v = bytes([n])
     return data + v * n
 
-
-def _split_key(identity=None):
-    """
-    An identity is 2 private-keys: 16/32 byte-length
-    This helper will split that into: sign_key, encrypt_key
-    """
-    if not isinstance(identity, bytes):
-        raise ValueError("Identity must be bytes")
-    if len(identity) != 32 and len(identity) != 64:
-        raise ValueError(f"Identity must be 128 or 256 bits, not {len(identity)*8}")
-    midpoint = len(identity) // 2
-    return (identity[:midpoint], identity[midpoint:])
-
-
-def token_verify(sign_key, token):
-    """
-    HMAC verify token-signature
-    """
-    if not isinstance(token, bytes):
-        raise TypeError("Token must be bytes")
-    return token[-32:] == _hmac_sha256(sign_key, token[:-32])
-
-
-def token_decrypt(identity, token=None):
-    """
-    AES decrypt a token
-    """
-    (sign_key, encrypt_key) = _split_key(identity)
-    if not token_verify(sign_key, token):
-        raise ValueError("Token HMAC was invalid")
-    iv = token[:16]
-    plaintext = _aesCbcDecrypt(encrypt_key, iv, token[16:-32])
-    return _PKCS7_unpad(plaintext)
-
-
-def token_encrypt(identity, data=None):
-    """
-    AES encrypt a token
-    """
-    (sign_key, encrypt_key) = _split_key(identity)
-    if not isinstance(data, bytes):
-        raise TypeError("Token must be bytes")
-    iv = urandom(16)
-    ciphertext = _aesCbcEncrypt(encrypt_key, iv, _PKCS7_pad(data))
-    signed_parts = iv + ciphertext
-    return signed_parts + _hmac_sha256(sign_key, signed_parts)
-
-
 def decode_packet(packet_bytes):
-    if len(packet_bytes) < 2:
-        return None
     result = {}
     header1 = packet_bytes[0]
     result["ifac_flag"] = bool(header1 & 0b10000000)
@@ -166,12 +116,7 @@ def decode_packet(packet_bytes):
     result["packet_type"] = header1 & 0b00000011
     result["hops"] = packet_bytes[1]
     offset = 2
-
-    # Skip IFAC if present (implementation specific) – not parsed here
-    if result["ifac_flag"]:
-        result["has_ifac"] = True
-        # If IFAC exists in this capture, you must know its length to skip correctly.
-
+    
     addr_count = 2 if result["header_type"] else 1
     addr_size = TRUNCATED_HASHLENGTH * addr_count
     if len(packet_bytes) < offset + addr_size:
