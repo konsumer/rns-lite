@@ -144,7 +144,9 @@ def test_rns():
             sent_packets[packet_hash_truncated] = (packet['destination_hash'], packet_hash_full)
 
             identity = recipients[packet['destination_hash']]
-            # decryptedBytes = identity.decrypt(packet.data, ratchets=ratchets)
+            recipient_identity_private = recipients[ packet['destination_hash'] ]['private']
+            recipient_identity_public = recipients[ packet['destination_hash'] ]['public']
+            decryptedBytes = rns.message_decrypt(recipient_identity_private, recipient_identity_public, packet, ratchets)
             # ts, title, content, fields = umsgpack.unpackb(decryptedBytes[80:])
 
             print(f"    MessageId: {packet_hash_truncated.hex()}")
