@@ -85,12 +85,15 @@ if sys.implementation.name == "micropython":
         except Exception as e:
             return False
 
+    def _x25519_exchange(private_key, public_key):
+        return x25519.scalar_mult(private_key, public_key)
+
 else:
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
     import hmac
 
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
     from cryptography.hazmat.primitives import serialization
 
@@ -129,6 +132,12 @@ else:
             return True
         except Exception as e:
             return False
+
+    def _x25519_exchange(private_key, public_key):
+        prv_key_obj = X25519PrivateKey.from_private_bytes(private_key)
+        pub_key_obj = X25519PublicKey.from_public_bytes(public_key)
+        shared_secret = prv_key_obj.exchange(pub_key_obj)
+        return shared_secret
 
 
 def _sha256(data):
@@ -293,7 +302,60 @@ def proof_validate(packet, identity, full_packet_hash):
     return _ed25519_checkvalid(identity['public']['sign'], packet['data'][1:65], full_packet_hash)
 
 def message_decrypt(identity, packet, ratchets=None):
-    pass
-    #TODO
+    """
+    Decrypt a message packet using identity's private key and optional ratchets.
+    """
+    identity_hash = hashlib.sha256(identity['public']['encrypt'] + identity['public']['sign']).digest()[:16]
+
+    ciphertext_token = packet.get('data', b'')
+    if not ciphertext_token or len(ciphertext_token) <= 49:
+        return None
+        
+    # Skip first byte to match RNS data extraction  
+    ciphertext_token = ciphertext_token[1:]  # Skip the leading 0x00
+    
+    # Extract ephemeral public key and token
+    peer_pub_bytes = ciphertext_token[:32]
+    ciphertext = ciphertext_token[32:]
+    
+    # Rest of function stays the same...
+    if ratchets:
+        for i, ratchet in enumerate(ratchets):
+            if len(ratchet) != 32:
+                continue
+            try:
+                shared_key = _x25519_exchange(ratchet, peer_pub_bytes)
+                derived_key = _hkdf(
+                    length=64,
+                    derive_from=shared_key,
+                    salt=identity_hash,
+                    context=None
+                )
+                
+                signing_key = derived_key[:32] 
+                encryption_key = derived_key[32:]
+                
+                if len(ciphertext) <= 48:
+                    continue
+                    
+                received_hmac = ciphertext[-32:]
+                signed_data = ciphertext[:-32]
+                expected_hmac = _hmac_sha256(signing_key, signed_data)
+                
+                if received_hmac != expected_hmac:
+                    continue
+                    
+                iv = ciphertext[:16]
+                ciphertext_data = ciphertext[16:-32]
+                padded_plaintext = _aes_cbc_decrypt(encryption_key, iv, ciphertext_data)
+                plaintext = _pkcs7_unpad(padded_plaintext)
+                
+                return plaintext
+                
+            except Exception:
+                continue
+    
+    return None
+
 
 
