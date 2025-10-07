@@ -134,9 +134,6 @@ else:
 def _sha256(data):
     return hashlib.sha256(data).digest()
 
-def _sha512(data):
-    return hashlib.sha512(data).digest()
-
 def _hkdf(length=None, derive_from=None, salt=None, context=None):
     hash_len = 32
 
