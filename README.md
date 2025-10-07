@@ -68,9 +68,6 @@ ampy --port /dev/tty.usbserial-0001 put rns.py
 ampy --port /dev/tty.usbserial-0001 put x25519
 ampy --port /dev/tty.usbserial-0001 put ed25519.py
 
-# upload test programs
-ampy --port /dev/tty.usbserial-0001 put example_heltec_offline.py
-
 # upload OLED driver
 curl https://raw.githubusercontent.com/micropython/micropython-lib/refs/heads/master/micropython/drivers/display/ssd1306/ssd1306.py > /tmp/ssd1306.py
 ampy --port /dev/tty.usbserial-0001 put /tmp/ssd1306.py
@@ -84,6 +81,9 @@ ampy --port /dev/tty.usbserial-0001 put /tmp/micropySX126X/lib/sx126x.py
 # upload msgpack
 git clone https://github.com/peterhinch/micropython-msgpack.git /tmp/micropython-msgpack
 ampy --port /dev/tty.usbserial-0001 put /tmp/micropython-msgpack/umsgpack
+
+# upload test programs
+ampy --port /dev/tty.usbserial-0001 put example_heltec_offline.py
 ```
 
 On mac/linux, I like to use picocom for my serial-terminal:
