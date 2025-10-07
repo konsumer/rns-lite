@@ -305,7 +305,7 @@ def message_decrypt(identity, packet, ratchets=None):
     """
     Decrypt a message packet using identity's private key and optional ratchets.
     """
-    identity_hash = hashlib.sha256(identity['public']['encrypt'] + identity['public']['sign']).digest()[:16]
+    identity_hash = _sha256(identity['public']['encrypt'] + identity['public']['sign'])[:16]
 
     ciphertext_token = packet.get('data', b'')
     if not ciphertext_token or len(ciphertext_token) <= 49:
