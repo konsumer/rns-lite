@@ -307,3 +307,7 @@ def get_message_id(packet):
 def message_decrypt(recipient_identity_private, recipient_identity_public, packet, ratchets=None):
     pass
     # TODO
+
+def identity_validate(packet_data, full_packet_hash):
+    pass
+    #TODO
