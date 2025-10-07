@@ -45,7 +45,6 @@ if sys.implementation.name == "micropython":
     # https://ed25519.cr.yp.to/python/ed25519.py
     import ed25519
 
-    # this is slower, but works in micropython
     def get_identity_from_bytes(private_identity_bytes):
         encryption_private = private_identity_bytes[:32]
         signing_private = private_identity_bytes[32:64]
@@ -53,7 +52,6 @@ if sys.implementation.name == "micropython":
         signing_public = ed25519.publickey(signing_private)
         return {'public': {'encrypt': encryption_public, 'sign': signing_public }, 'private': { 'encrypt': encryption_private, 'sign': signing_private }}
 
-    # HMAC-SHA256 implementation for MicroPython
     def _hmac_sha256(sign_key, data):
         # Standard HMAC construction per RFC 2104
         block_size = 64  # SHA256 block size
@@ -72,17 +70,14 @@ if sys.implementation.name == "micropython":
         inner_hash = hashlib.sha256(i_key_pad + data).digest()
         return hashlib.sha256(o_key_pad + inner_hash).digest()
 
-    # AES-CBC encrypt for MicroPython
     def _aes_cbc_encrypt(encrypt_key, iv, plaintext):
         cipher = aes(encrypt_key, 2, iv)  # mode 2 = CBC
         return cipher.encrypt(plaintext)
 
-    # AES-CBC decrypt for MicroPython
     def _aes_cbc_decrypt(encrypt_key, iv, ciphertext):
         cipher = aes(encrypt_key, 2, iv)  # mode 2 = CBC
         return cipher.decrypt(ciphertext)
 
-    # Wrapper for ed25519 signature verification.
     def _ed25519_checkvalid(sign_key_pub, signature, message):
         try:
             ed25519.checkvalid(signature, message, sign_key_pub)
@@ -114,17 +109,14 @@ else:
         )
         return {'public': {'encrypt': encryption_public, 'sign': signing_public }, 'private': { 'encrypt': encryption_private, 'sign': signing_private }}
 
-    # wrapped HMAC computation
     def _hmac_sha256(sign_key, data):
         return hmac.new(sign_key, data, hashlib.sha256).digest()
 
-    # wrapped AES CBC encrypt
     def _aes_cbc_encrypt(encrypt_key, iv, plaintext):
         cipher = Cipher(algorithms.AES(encrypt_key), modes.CBC(iv))
         encryptor = cipher.encryptor()
         return encryptor.update(plaintext) + encryptor.finalize()
 
-    # wrapped AES CBC decrypt
     def _aes_cbc_decrypt(encrypt_key, iv, ciphertext):
         cipher = Cipher(algorithms.AES(encrypt_key), modes.CBC(iv))
         decryptor = cipher.decryptor()
@@ -139,15 +131,12 @@ else:
             return False
 
 
-# wrapped SHA256 hash
 def _sha256(data):
     return hashlib.sha256(data).digest()
 
-# wrapped SHA512 hash
 def _sha512(data):
     return hashlib.sha512(data).digest()
 
-# wrapped HKDF
 def _hkdf(length=None, derive_from=None, salt=None, context=None):
     hash_len = 32
 
