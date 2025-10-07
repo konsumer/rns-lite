@@ -83,9 +83,9 @@ if sys.implementation.name == "micropython":
         return cipher.decrypt(ciphertext)
 
     # Wrapper for ed25519 signature verification.
-    def _ed25519_checkvalid(signature, message, public_key):
+    def _ed25519_checkvalid(sign_key_pub, signature, message):
         try:
-            ed25519.checkvalid(signature, message, public_key)
+            ed25519.checkvalid(signature, message, sign_key_pub)
             return True
         except Exception as e:
             return False
@@ -130,9 +130,9 @@ else:
         decryptor = cipher.decryptor()
         return decryptor.update(ciphertext) + decryptor.finalize()
 
-    def _ed25519_checkvalid(signature, message, public_key):
+    def _ed25519_checkvalid(sign_key_pub, signature, message):
         try:
-            pub_key_obj = Ed25519PublicKey.from_public_bytes(public_key)
+            pub_key_obj = Ed25519PublicKey.from_public_bytes(sign_key_pub)
             pub_key_obj.verify(signature, message)
             return True
         except Exception as e:
@@ -289,8 +289,8 @@ def announce_parse(packet):
     )
     
     # Verify signature
-    out['valid'] = _ed25519_checkvalid(out['signature'], signed_data, out['key_pub_signature'])
-    
+    out['valid'] = _ed25519_checkvalid(out['key_pub_signature'], out['signature'], signed_data)
+
     return out
 
 
