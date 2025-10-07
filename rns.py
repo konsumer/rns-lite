@@ -349,7 +349,7 @@ def proof_validate(packet, identity, full_packet_hash):
     return _ed25519_validate(identity['public']['sign'], packet['data'][1:65], full_packet_hash)
 
 # decrypt a DATA packet (output from decode_packet)
-def message_decrypt(identity, packet, ratchets=None):
+def message_decrypt(packet, identity, ratchets=None):
     """
     Decrypt a message packet using identity's private key and optional ratchets.
     """
@@ -399,7 +399,6 @@ def message_decrypt(identity, packet, ratchets=None):
                 
             except Exception:
                 continue
-    
     return None
 
 

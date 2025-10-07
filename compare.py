@@ -143,7 +143,7 @@ def test_rns():
             sent_packets[packet_hash_truncated] = (packet['destination_hash'], packet_hash_full)
             print(f"    MessageId: {packet_hash_truncated.hex()}")
 
-            decryptedBytes = rns.message_decrypt(recipients[packet['destination_hash']], packet, ratchets)
+            decryptedBytes = rns.message_decrypt(packet, recipients[packet['destination_hash']], ratchets)
             ts, title, content, fields = umsgpack.unpackb(decryptedBytes[80:])
             print(f"    Time: {ts}")
             print(f"    Title: {title}")
