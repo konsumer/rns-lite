@@ -4,7 +4,7 @@ import rns
 import RNS
 import umsgpack
 
-# shared data from real clients: [sign_key, encrypt_key]
+# shared data from real clients: [encrypt_key, sign_key]
 keys = {
     '072ec44973a8dee8e28d230fb4af8fe4': bytes.fromhex('205131cb9672eaec8a582e8e018307f2428c4aac5e383f12e94939e672b931677763c7398d0b9cb6ef1369d023d8af10b85d80f6579c55a6f528953265c15313'),
     '76a93cda889a8c0a88451e02d53fd8b9': bytes.fromhex('e8c5c096166f3554868de9133b0c55c7abf0318230860a142ea3f84a0aae7759142f6c0b84d9f537ceb2e8e9678fc9fb77caf91e2176278fb4c4f5c3eb7b48cd')
@@ -77,12 +77,11 @@ def test_RNS():
             packet_hash_full = packet.get_hash()  # 32-byte for validation
             packet_hash_truncated = packet_hash_full[:16]  # 16-byte for lookup
             sent_packets[packet_hash_truncated] = (packet.destination_hash, packet_hash_full)
+            print(f"    MessageId: {packet_hash_truncated.hex()}")
 
             identity = recipients[packet.destination_hash]
             decryptedBytes = identity.decrypt(packet.data, ratchets=ratchets)
             ts, title, content, fields = umsgpack.unpackb(decryptedBytes[80:])
-
-            print(f"    MessageId: {packet_hash_truncated.hex()}")
             print(f"    Time: {ts}")
             print(f"    Title: {title}")
             print(f"    Content: {content}")
@@ -103,18 +102,16 @@ def test_RNS():
 
 def test_rns():
     print("rns")
-    clientA_private = keys['072ec44973a8dee8e28d230fb4af8fe4']
-    clientA_public = rns.get_identity_public(clientA_private)
-    clientA_addr = rns.get_destination_hash(clientA_public, "lxmf", "delivery")
+    clientA = rns.get_identity_from_bytes(keys['072ec44973a8dee8e28d230fb4af8fe4'])
+    clientA_addr = rns.get_destination_hash(clientA, "lxmf", "delivery")
     print(f"  Client A: {clientA_addr.hex()}")
-    clientB_private = keys['76a93cda889a8c0a88451e02d53fd8b9']
-    clientB_public = rns.get_identity_public(clientB_private)
-    clientB_addr = rns.get_destination_hash(clientB_public, "lxmf", "delivery")
+    clientB = rns.get_identity_from_bytes(keys['76a93cda889a8c0a88451e02d53fd8b9'])
+    clientB_addr = rns.get_destination_hash(clientB, "lxmf", "delivery")
     print(f"  Client B: {clientB_addr.hex()}")
 
     recipients = {
-        clientA_addr: { 'private' : clientA_private, 'public': clientA_public },
-        clientB_addr: { 'private' : clientB_private, 'public': clientB_public }
+        clientA_addr: clientA,
+        clientB_addr: clientB
     }
 
     # track DATA packets that have been sent
@@ -142,14 +139,10 @@ def test_rns():
             packet_hash_full = rns.get_message_id(packet)  # 32-byte for validation
             packet_hash_truncated = packet_hash_full[:16]  # 16-byte for lookup
             sent_packets[packet_hash_truncated] = (packet['destination_hash'], packet_hash_full)
-
-            identity = recipients[packet['destination_hash']]
-            recipient_identity_private = recipients[ packet['destination_hash'] ]['private']
-            recipient_identity_public = recipients[ packet['destination_hash'] ]['public']
-            decryptedBytes = rns.message_decrypt(recipient_identity_private, recipient_identity_public, packet, ratchets)
-            # ts, title, content, fields = umsgpack.unpackb(decryptedBytes[80:])
-
             print(f"    MessageId: {packet_hash_truncated.hex()}")
+
+            decryptedBytes = rns.message_decrypt(recipients[packet['destination_hash']], packet, ratchets)
+            # ts, title, content, fields = umsgpack.unpackb(decryptedBytes[80:])
             # print(f"    Time: {ts}")
             # print(f"    Title: {title}")
             # print(f"    Content: {content}")
@@ -159,8 +152,7 @@ def test_rns():
             print(f"  PROOF for {packet['destination_hash'].hex()}")
             if packet['destination_hash'] in sent_packets:
                 recipient_hash, full_packet_hash = sent_packets[packet['destination_hash']]
-                identity = recipients[recipient_hash]
-                if rns.identity_validate(packet['data'], full_packet_hash):
+                if rns.identity_validate(recipients[recipient_hash], packet, full_packet_hash):
                     print('    Valid: Yes')
                 else:
                     print('    Valid: No')

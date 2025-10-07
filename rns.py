@@ -46,12 +46,12 @@ if sys.implementation.name == "micropython":
     import ed25519
 
     # this is slower, but works in micropython
-    def get_identity_public(private_identity_bytes):
+    def get_identity_from_bytes(private_identity_bytes):
         encryption_private = private_identity_bytes[:32]
         signing_private = private_identity_bytes[32:64]
         encryption_public = x25519.scalar_base_mult(encryption_private)
         signing_public = ed25519.publickey(signing_private)
-        return encryption_public + signing_public
+        return {'public': {'encrypt': encryption_public, 'sign': signing_public }, 'private': { 'encrypt': encryption_private, 'sign': signing_private }}
 
     # HMAC-SHA256 implementation for MicroPython
     def _hmac_sha256(sign_key, data):
@@ -99,7 +99,7 @@ else:
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
     from cryptography.hazmat.primitives import serialization
 
-    def get_identity_public(private_identity_bytes):
+    def get_identity_from_bytes(private_identity_bytes):
         encryption_private = private_identity_bytes[:32]
         signing_private = private_identity_bytes[32:64]
         encrypt_key = X25519PrivateKey.from_private_bytes(encryption_private)
@@ -112,7 +112,7 @@ else:
             encoding=serialization.Encoding.Raw,
             format=serialization.PublicFormat.Raw
         )
-        return encryption_public + signing_public
+        return {'public': {'encrypt': encryption_public, 'sign': signing_public }, 'private': { 'encrypt': encryption_private, 'sign': signing_private }}
 
     # wrapped HMAC computation
     def _hmac_sha256(sign_key, data):
@@ -192,8 +192,8 @@ def _pkcs7_pad(data, bs=16):
     v = bytes([n])
     return data + v * n
 
-def get_destination_hash(public_identity_bytes, app_name, *aspects):
-    identity_hash = _sha256(public_identity_bytes)[:16]
+def get_destination_hash(identity, app_name, *aspects):
+    identity_hash = _sha256(identity['public']['encrypt'] + identity['public']['sign'])[:16]
     full_name = app_name
     for aspect in aspects:
         full_name += "." + aspect
@@ -303,11 +303,11 @@ def get_message_id(packet):
         hashable_part += packet['raw'][2:]
     return _sha256(hashable_part)
 
-
-def message_decrypt(recipient_identity_private, recipient_identity_public, packet, ratchets=None):
+# recipientIdentity: { public: {} }
+def message_decrypt(identity, packet, ratchets=None):
     pass
     # TODO
 
-def identity_validate(packet_data, full_packet_hash):
+def identity_validate(identity, packet, full_packet_hash):
     pass
     #TODO
