@@ -152,7 +152,8 @@ def test_rns():
             print(f"  PROOF for {packet['destination_hash'].hex()}")
             if packet['destination_hash'] in sent_packets:
                 recipient_hash, full_packet_hash = sent_packets[packet['destination_hash']]
-                if rns.proof_validate(packet, recipients[recipient_hash], full_packet_hash):
+                identity = recipients[recipient_hash]
+                if rns.proof_validate(packet, identity, full_packet_hash):
                     print('    Valid: Yes')
                 else:
                     print('    Valid: No')

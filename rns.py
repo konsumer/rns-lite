@@ -289,14 +289,11 @@ def get_message_id(packet):
         hashable_part += packet['raw'][2:]
     return _sha256(hashable_part)
 
+def proof_validate(packet, identity, full_packet_hash):
+    return _ed25519_checkvalid(identity['public']['sign'], packet['data'][1:65], full_packet_hash)
 
 def message_decrypt(identity, packet, ratchets=None):
     pass
-    # TODO
-
-def identity_validate(identity, data, data_hash):
-    pass
     #TODO
 
-def proof_validate(packet, identity, full_packet_hash):
-    return identity_validate(identity, packet['data'], full_packet_hash)
+
