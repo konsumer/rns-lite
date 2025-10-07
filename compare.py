@@ -125,7 +125,9 @@ def test_rns():
         if packet['packet_type'] == rns.PACKET_ANNOUNCE:
             print(f"  ANNOUNCE to {packet['destination_hash'].hex()}")
             announce = rns.announce_parse(packet)
-            # TODO: need a way to store ratchet private here
+            ratchet = announce.get('ratchet_pub', None)
+            if ratchet:
+                print(f'    Ratchet: {ratchet.hex()}')
             if announce['valid']:
                 print("    Valid: Yes")
             else:
