@@ -178,25 +178,12 @@ def _hkdf(length=None, derive_from=None, salt=None, context=None):
 
 
 def _pkcs7_unpad(padded_data):
-    if not padded_data:
-        return None
-        
-    pad_length = padded_data[-1]
-    
-    # Validate padding length
-    if pad_length > 16 or pad_length == 0:
-        return None
-        
-    # Validate padding bytes
-    if len(padded_data) < pad_length:
-        return None
-        
-    for i in range(1, pad_length + 1):
-        if padded_data[-i] != pad_length:
-            return None
-    
-    # Remove padding
-    return padded_data[:-pad_length]
+    l = len(data)
+    n = data[-1]
+    if n > bs:
+        raise ValueError(f"Cannot unpad, invalid padding length of {n} bytes")
+    else:
+        return data[: l - n]
 
 
 def _pkcs7_pad(data, bs=16):
