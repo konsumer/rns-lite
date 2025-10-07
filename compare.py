@@ -82,11 +82,12 @@ def test_RNS():
             packet_hash_truncated = packet_hash_full[:16]  # 16-byte for lookup
             
             print(f"    MessageId: {packet_hash_truncated.hex()}")
-            sent_packets[packet_hash_truncated] = (packet.destination_hash, packet_hash_full)
-            
             print(f"    Time: {ts}")
             print(f"    Title: {title}")
             print(f"    Content: {content}")
+            sent_packets[packet_hash_truncated] = (packet.destination_hash, packet_hash_full)
+            
+           
 
         # validate PROOF
         if packet.packet_type == RNS.Packet.PROOF:
@@ -140,6 +141,10 @@ def test_rns():
             recipient_identity_private = recipient_keys[ packet['destination_hash'] ]['private']
             recipient_identity_public = recipient_keys[ packet['destination_hash'] ]['public']
             decryptedBytes = rns.message_decrypt(recipient_identity_private, recipient_identity_public, packet, ratchets)
+            ts, title, content, fields = umsgpack.unpackb(decryptedBytes[80:])
+            print(f"    Time: {ts}")
+            print(f"    Title: {title}")
+            print(f"    Content: {content}")
 
         # validate PROOF
         if packet['packet_type'] == rns.PACKET_PROOF:
