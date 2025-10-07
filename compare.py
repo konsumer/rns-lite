@@ -66,19 +66,20 @@ def test_RNS():
         if packet.packet_type == RNS.Packet.ANNOUNCE:
             print(f"  ANNOUNCE to {packet.destination_hash.hex()}")
             if RNS.Identity.validate_announce(packet, True):
-                print("    Valid: Yes")
+                print(f"    Valid: Yes")
             else:
-                print("    Valid: No")
+                print(f"    Valid: No")
 
         # decrypt DATA
         if packet.packet_type == RNS.Packet.DATA:
             print(f"  DATA to {packet.destination_hash.hex()}")
+
             identity = recipients[packet.destination_hash]
             decryptedBytes = identity.decrypt(packet.data, ratchets=ratchets)
             ts, title, content, fields = umsgpack.unpackb(decryptedBytes[80:])
             
-            packet_hash_truncated = packet.get_hash()[:16]  # 16-byte for lookup
             packet_hash_full = packet.get_hash()  # 32-byte for validation
+            packet_hash_truncated = packet_hash_full[:16]  # 16-byte for lookup
             
             print(f"    MessageId: {packet_hash_truncated.hex()}")
             sent_packets[packet_hash_truncated] = (packet.destination_hash, packet_hash_full)
@@ -110,6 +111,12 @@ def test_rns():
     clientB_public = rns.get_identity_public(clientB_private)
     clientB_addr = rns.get_destination_hash(clientB_public, "lxmf", "delivery")
     print(f"  Client B: {clientB_addr.hex()}")
+
+    recipient_keys = {
+        clientA_addr: { 'private' : clientA_private, 'public': clientA_public },
+        clientB_addr: { 'private' : clientB_private, 'public': clientB_public }
+    } 
+
     for packetBytes in packets:
         print("")
         packet = rns.decode_packet(packetBytes)
@@ -117,7 +124,9 @@ def test_rns():
         # validate ANNOUNCE
         if packet['packet_type'] == rns.PACKET_ANNOUNCE:
             print(f"  ANNOUNCE to {packet['destination_hash'].hex()}")
-            if rns.announce_validate(packet):
+            announce = rns.announce_parse(packet)
+            # TODO: need a way to store ratchet private here
+            if announce['valid']:
                 print("    Valid: Yes")
             else:
                 print("    Valid: No")
@@ -126,8 +135,11 @@ def test_rns():
         # decrypt DATA
         if packet['packet_type'] == rns.PACKET_DATA:
             print(f"  DATA to {packet['destination_hash'].hex()}")
-            # TODO: rns.get_packet_hash(packet) for message-id (shows up in PROOF destination, so we need to map that to peer pubkey, in a dict)
-            # TODO: rns.data_decrypt(packet, identity_private, ratchets) - maybe needs identity_public
+            message_id = rns.get_message_id(packet)
+            print(f"    MessageId: {message_id[0:16].hex()}")
+            recipient_identity_private = recipient_keys[ packet['destination_hash'] ]['private']
+            recipient_identity_public = recipient_keys[ packet['destination_hash'] ]['public']
+            decryptedBytes = rns.message_decrypt(recipient_identity_private, recipient_identity_public, packet, ratchets)
 
         # validate PROOF
         if packet['packet_type'] == rns.PACKET_PROOF:
@@ -137,4 +149,5 @@ def test_rns():
 
 
 test_RNS()
+print("")
 test_rns()

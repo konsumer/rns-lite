@@ -4,6 +4,7 @@
 import sys
 from os import urandom
 import hashlib
+from math import ceil
 
 PACKET_DATA         = 0x00     # Data packets
 PACKET_ANNOUNCE     = 0x01     # Announces
@@ -95,6 +96,7 @@ else:
 
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
     from cryptography.hazmat.primitives import serialization
 
     def get_identity_public(private_identity_bytes):
@@ -127,6 +129,15 @@ else:
         cipher = Cipher(algorithms.AES(encrypt_key), modes.CBC(iv))
         decryptor = cipher.decryptor()
         return decryptor.update(ciphertext) + decryptor.finalize()
+
+    def _ed25519_checkvalid(signature, message, public_key):
+        try:
+            pub_key_obj = Ed25519PublicKey.from_public_bytes(public_key)
+            pub_key_obj.verify(signature, message)
+            return True
+        except Exception as e:
+            return False
+
 
 # wrapped SHA256 hash
 def _sha256(data):
@@ -194,6 +205,8 @@ def get_destination_hash(public_identity_bytes, app_name, *aspects):
 
 def decode_packet(packet_bytes):
     result = {}
+    result["raw"] = packet_bytes
+
     result["ifac_flag"] = bool(packet_bytes[0] & 0b10000000)
     result["header_type"] = bool(packet_bytes[0] & 0b01000000)
     result["context_flag"] = bool(packet_bytes[0] & 0b00100000)
@@ -222,80 +235,75 @@ def decode_packet(packet_bytes):
         result["context"] = None
 
     result["data"] = packet_bytes[offset:]
-    result["raw"] = packet_bytes
     return result
 
-def announce_validate(packet):
-    """
-    Validate an ANNOUNCE packet.
-    """
+def announce_parse(packet):
+    keysize = 64
+    per_keysize = keysize // 2  # 32
+    ratchetsize = 32
+    name_hash_len = 10
+    random_hash_len = 10
+    sig_len = 64
+    
     data = packet['data']
-    dest_hash = packet['destination_hash']
+    out = {'valid': False}
     
-    print(f"    Data length: {len(data)}")
-    print(f"    Dest hash: {dest_hash.hex()}")
+    # Extract public keys (first 64 bytes)
+    out['key_pub_encrypt'] = data[0:per_keysize]
+    out['key_pub_signature'] = data[per_keysize:keysize]
     
-    # Search for where the identity hash might be
-    print(f"    Searching for identity in data...")
-    if dest_hash in data:
-        pos = data.index(dest_hash)
-        print(f"    Found dest_hash at position: {pos}")
+    # Extract name_hash and random_hash
+    out['name_hash'] = data[keysize:(keysize + name_hash_len)]
+    out['random_hash'] = data[(keysize + name_hash_len):(keysize + name_hash_len + random_hash_len)]
     
-    # The signature is always the last 64 bytes
-    signature = data[-64:]
+    # Get context_flag (try both possible key names)
+    context_flag = packet.get('context_flag', packet.get('context', 0))
     
-    # Try different offsets for the crypto material
-    # Maybe it's not 148 bytes from the end?
-    
-    # Let's try: the public key might be at the START (after app_data length prefix?)
-    # Or maybe the structure includes the destination hash in the data?
-    
-    # Parse the first 16 bytes - could be the destination hash
-    possible_dest = data[:16]
-    print(f"    First 16 bytes: {possible_dest.hex()}")
-    
-    if possible_dest == dest_hash:
-        print(f"    Destination hash is at start of data!")
-        # Structure: dest_hash (16) + public_key (64) + name_hash (10) + random_hash (10) + app_data (?) + signature (64)
-        public_key = data[16:80]
-        name_hash = data[80:90]
-        random_hash = data[90:100]
-        app_data = data[100:-64]
-        signature = data[-64:]
+    # Does this packet have a ratchet pubkey?
+    if context_flag == 1:
+        out['ratchet_pub'] = data[(keysize + name_hash_len + random_hash_len):(keysize + name_hash_len + random_hash_len + ratchetsize)]
+        out['signature'] = data[(keysize + name_hash_len + random_hash_len + ratchetsize):(keysize + name_hash_len + random_hash_len + ratchetsize + sig_len)]
+        
+        if len(data) > (keysize + name_hash_len + random_hash_len + ratchetsize + sig_len):
+            out['app_data'] = data[(keysize + name_hash_len + random_hash_len + ratchetsize + sig_len):]
+        else:
+            out['app_data'] = b''
     else:
-        # Try: public_key at start
-        public_key = data[:64]
-        name_hash = data[64:74]
-        random_hash = data[74:84]
-        app_data = data[84:-64]
-        signature = data[-64:]
-    
-    print(f"    Public key: {public_key.hex()}")
-    
-    # Try both key orders
-    identity_hash_1 = _sha256(public_key)[:16]
-    identity_hash_2 = _sha256(public_key[32:] + public_key[:32])[:16]  # swapped
-    
-    print(f"    Identity (enc+sign): {identity_hash_1.hex()}")
-    print(f"    Identity (sign+enc): {identity_hash_2.hex()}")
-    
-    if identity_hash_1 == dest_hash:
-        print(f"    Match with enc+sign order")
-        identity_hash = identity_hash_1
-        signing_public_key = public_key[32:64]
-    elif identity_hash_2 == dest_hash:
-        print(f"    Match with sign+enc order")
-        identity_hash = identity_hash_2
-        signing_public_key = public_key[:32]
-    else:
-        print(f"    No identity match found")
-        return False
+        out['ratchet_pub'] = out['key_pub_encrypt']
+        out['signature'] = data[(keysize + name_hash_len + random_hash_len):(keysize + name_hash_len + random_hash_len + sig_len)]
+        
+        if len(data) > (keysize + name_hash_len + random_hash_len + sig_len):
+            out['app_data'] = data[(keysize + name_hash_len + random_hash_len + sig_len):]
+        else:
+            out['app_data'] = b''
     
     # Construct signed data
-    signed_data = dest_hash + public_key + name_hash + random_hash + app_data
+    signed_data = (
+        packet['destination_hash'] + 
+        out['key_pub_encrypt'] + 
+        out['key_pub_signature'] + 
+        out['name_hash'] + 
+        out['random_hash'] + 
+        out['ratchet_pub'] + 
+        (out['app_data'] if out['app_data'] else b'')
+    )
     
-    result = _ed25519_checkvalid(signature, signed_data, signing_public_key)
-    print(f"    Signature validation: {result}")
+    # Verify signature
+    out['valid'] = _ed25519_checkvalid(out['signature'], signed_data, out['key_pub_signature'])
     
-    return result
+    return out
 
+
+def get_message_id(packet):
+    header_type = (packet['raw'][0] >> 6) & 0b11
+    hashable_part = bytes([packet['raw'][0] & 0b00001111])
+    if header_type == 1:
+        hashable_part += packet['raw'][18:]
+    else:
+        hashable_part += packet['raw'][2:]
+    return _sha256(hashable_part)
+
+
+def message_decrypt(recipient_identity_private, recipient_identity_public, packet, ratchets=None):
+    pass
+    # TODO
