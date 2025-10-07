@@ -50,7 +50,14 @@ if sys.implementation.name == "micropython":
         signing_private = private_identity_bytes[32:64]
         encryption_public = x25519.scalar_base_mult(encryption_private)
         signing_public = ed25519.publickey(signing_private)
-        return {'public': {'encrypt': encryption_public, 'sign': signing_public }, 'private': { 'encrypt': encryption_private, 'sign': signing_private }}
+        return {'public': { 'encrypt': encryption_public, 'sign': signing_public }, 'private': { 'encrypt': encryption_private, 'sign': signing_private }}
+
+    def identity_create():
+        encryption_private = urandom(32)
+        signing_private = urandom(32)
+        encryption_public = x25519.scalar_base_mult(encryption_private)
+        signing_public = ed25519.publickey(signing_private)
+        return {'public': { 'encrypt': encryption_public, 'sign': signing_public }, 'private': { 'encrypt': encryption_private, 'sign': signing_private }}
 
     def _hmac_sha256(sign_key, data):
         # Standard HMAC construction per RFC 2104
@@ -78,7 +85,7 @@ if sys.implementation.name == "micropython":
         cipher = aes(encrypt_key, 2, iv)  # mode 2 = CBC
         return cipher.decrypt(ciphertext)
 
-    def _ed25519_checkvalid(sign_key_pub, signature, message):
+    def _ed25519_validate(sign_key_pub, signature, message):
         try:
             ed25519.checkvalid(signature, message, sign_key_pub)
             return True
@@ -112,6 +119,15 @@ else:
         )
         return {'public': {'encrypt': encryption_public, 'sign': signing_public }, 'private': { 'encrypt': encryption_private, 'sign': signing_private }}
 
+    def identity_create():
+        encrypt_key = X25519PrivateKey.generate()
+        encryption_private = encrypt_key.private_bytes(encoding=serialization.Encoding.Raw, format=serialization.PrivateFormat.Raw, encryption_algorithm=serialization.NoEncryption())
+        encryption_public = encrypt_key.public_key().public_bytes(encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw)
+        sign_key = Ed25519PrivateKey.generate()
+        signing_private = sign_key.private_bytes(encoding=serialization.Encoding.Raw, format=serialization.PrivateFormat.Raw, encryption_algorithm=serialization.NoEncryption())
+        signing_public = sign_key.public_key().public_bytes(encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw)
+        return { 'public': { 'encrypt': encryption_public, 'sign': signing_public }, 'private': { 'encrypt': encryption_private, 'sign': signing_private} }
+
     def _hmac_sha256(sign_key, data):
         return hmac.new(sign_key, data, hashlib.sha256).digest()
 
@@ -125,7 +141,7 @@ else:
         decryptor = cipher.decryptor()
         return decryptor.update(ciphertext) + decryptor.finalize()
 
-    def _ed25519_checkvalid(sign_key_pub, signature, message):
+    def _ed25519_validate(sign_key_pub, signature, message):
         try:
             pub_key_obj = Ed25519PublicKey.from_public_bytes(sign_key_pub)
             pub_key_obj.verify(signature, message)
@@ -179,7 +195,6 @@ def _pkcs7_unpad(data, bs=16):
         raise ValueError(f"Cannot unpad, invalid padding length of {n} bytes")
     else:
         return data[: l - n]
-
 
 def _pkcs7_pad(data, bs=16):
     l = len(data)
@@ -284,7 +299,7 @@ def announce_parse(packet):
     )
     
     # Verify signature
-    out['valid'] = _ed25519_checkvalid(out['key_pub_signature'], out['signature'], signed_data)
+    out['valid'] = _ed25519_validate(out['key_pub_signature'], out['signature'], signed_data)
 
     return out
 
@@ -299,7 +314,7 @@ def get_message_id(packet):
     return _sha256(hashable_part)
 
 def proof_validate(packet, identity, full_packet_hash):
-    return _ed25519_checkvalid(identity['public']['sign'], packet['data'][1:65], full_packet_hash)
+    return _ed25519_validate(identity['public']['sign'], packet['data'][1:65], full_packet_hash)
 
 def message_decrypt(identity, packet, ratchets=None):
     """

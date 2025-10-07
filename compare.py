@@ -160,6 +160,5 @@ def test_rns():
             else:
                 print(f"    No Message: {packet['destination_hash'].hex()}")
 
-
 test_RNS()
 test_rns()
