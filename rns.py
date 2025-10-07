@@ -310,13 +310,10 @@ def message_decrypt(identity, packet, ratchets=None):
     ciphertext_token = packet.get('data', b'')
     if not ciphertext_token or len(ciphertext_token) <= 49:
         return None
-        
-    # Skip first byte to match RNS data extraction  
-    ciphertext_token = ciphertext_token[1:]  # Skip the leading 0x00
     
     # Extract ephemeral public key and token
-    peer_pub_bytes = ciphertext_token[:32]
-    ciphertext = ciphertext_token[32:]
+    peer_pub_bytes = ciphertext_token[1:33]
+    ciphertext = ciphertext_token[33:]
     
     # Rest of function stays the same...
     if ratchets:
