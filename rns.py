@@ -177,7 +177,7 @@ def _hkdf(length=None, derive_from=None, salt=None, context=None):
     return derived[:length]
 
 
-def _pkcs7_unpad(padded_data):
+def _pkcs7_unpad(data, bs=16):
     l = len(data)
     n = data[-1]
     if n > bs:
@@ -303,7 +303,7 @@ def get_message_id(packet):
         hashable_part += packet['raw'][2:]
     return _sha256(hashable_part)
 
-# recipientIdentity: { public: {} }
+
 def message_decrypt(identity, packet, ratchets=None):
     pass
     # TODO
