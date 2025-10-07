@@ -102,6 +102,8 @@ def test_RNS():
 
 def test_rns():
     print("rns")
+
+    # verify I get correct destination addresses
     clientA = rns.get_identity_from_bytes(keys['072ec44973a8dee8e28d230fb4af8fe4'])
     clientA_addr = rns.get_destination_hash(clientA, "lxmf", "delivery")
     print(f"  Client A: {clientA_addr.hex()}")
@@ -109,10 +111,8 @@ def test_rns():
     clientB_addr = rns.get_destination_hash(clientB, "lxmf", "delivery")
     print(f"  Client B: {clientB_addr.hex()}")
 
-    recipients = {
-        clientA_addr: clientA,
-        clientB_addr: clientB
-    }
+    # put the addresses in easier-to-use shape
+    recipients = { clientA_addr: clientA, clientB_addr: clientB }
 
     # track DATA packets that have been sent
     sent_packets = {} 

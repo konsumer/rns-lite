@@ -308,6 +308,9 @@ def message_decrypt(identity, packet, ratchets=None):
     pass
     # TODO
 
-def proof_validate(identity, packet, full_packet_hash):
+def identity_validate(identity, data, data_hash):
     pass
     #TODO
+
+def proof_validate(identity, packet, full_packet_hash):
+    return identity_validate(identity, packet['data'], full_packet_hash)
