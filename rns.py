@@ -73,12 +73,12 @@ if sys.implementation.name == "micropython":
         return hashlib.sha256(o_key_pad + inner_hash).digest()
 
     # AES-CBC encrypt for MicroPython
-    def _aesCbcEncrypt(encrypt_key, iv, plaintext):
+    def _aes_cbc_encrypt(encrypt_key, iv, plaintext):
         cipher = aes(encrypt_key, 2, iv)  # mode 2 = CBC
         return cipher.encrypt(plaintext)
 
     # AES-CBC decrypt for MicroPython
-    def _aesCbcDecrypt(encrypt_key, iv, ciphertext):
+    def _aes_cbc_decrypt(encrypt_key, iv, ciphertext):
         cipher = aes(encrypt_key, 2, iv)  # mode 2 = CBC
         return cipher.decrypt(ciphertext)
 
@@ -119,13 +119,13 @@ else:
         return hmac.new(sign_key, data, hashlib.sha256).digest()
 
     # wrapped AES CBC encrypt
-    def _aesCbcEncrypt(encrypt_key, iv, plaintext):
+    def _aes_cbc_encrypt(encrypt_key, iv, plaintext):
         cipher = Cipher(algorithms.AES(encrypt_key), modes.CBC(iv))
         encryptor = cipher.encryptor()
         return encryptor.update(plaintext) + encryptor.finalize()
 
     # wrapped AES CBC decrypt
-    def _aesCbcDecrypt(encrypt_key, iv, ciphertext):
+    def _aes_cbc_decrypt(encrypt_key, iv, ciphertext):
         cipher = Cipher(algorithms.AES(encrypt_key), modes.CBC(iv))
         decryptor = cipher.decryptor()
         return decryptor.update(ciphertext) + decryptor.finalize()
