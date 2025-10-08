@@ -105,6 +105,9 @@ if sys.implementation.name == "micropython":
     def _x25519_exchange(private_key, public_key):
         return x25519.scalar_mult(private_key, public_key)
 
+    def _x25519_sign(signed_data, sign_key_priv, sign_key_pub):
+        return ed25519.signature(signed_data, sign_key_priv, sign_key_pub)
+
 else:
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
     import hmac
@@ -183,6 +186,10 @@ else:
         pub_key_obj = X25519PublicKey.from_public_bytes(public_key)
         shared_secret = prv_key_obj.exchange(pub_key_obj)
         return shared_secret
+
+    def _x25519_sign(signed_data, sign_key_priv, sign_key_pub):
+        sign_key = Ed25519PrivateKey.from_private_bytes(sign_key_priv)
+        return sign_key.sign(signed_data)
 
 
 def _sha256(data):
@@ -277,6 +284,40 @@ def decode_packet(packet_bytes):
     result["data"] = packet_bytes[offset:]
     return result
 
+def encode_packet(packet):
+    header_byte = 0
+    source_hash = packet.get('source_hash', False)
+    if souce_hash:
+        packet['header_type'] = 1
+    if packet.get('ifac_flag', False):
+        header_byte |= 0b10000000
+    if packet.get('header_type', False):
+        header_byte |= 0b01000000
+    if packet.get('context_flag', False):
+        header_byte |= 0b00100000
+    if packet.get('propagation_type', False):
+        header_byte |= 0b00010000
+    destination_type = packet.get('destination_type', 0) & 0b00001100
+    header_byte |= destination_type
+    packet_type = packet.get('packet_type', 0) & 0b00000011
+    header_byte |= packet_type
+    packet_bytes = bytes([header_byte])
+    hops = packet.get('hops', 0) & 0xFF
+    packet_bytes += bytes([hops])
+    destination_hash = packet.get('destination_hash', b'')
+    if len(destination_hash) != 16:
+        raise ValueError("destination_hash must be exactly 16 bytes")
+    packet_bytes += destination_hash
+    if source_hash:
+        packet_bytes += source_hash
+    if packet.get('context_flag', False):
+        context = packet.get('context', 0) & 0xFF
+        packet_bytes += bytes([context])
+    data = packet.get('data', b'')
+    packet_bytes += data
+    return packet_bytes
+
+
 # parse an ANNOUNCE packet (output from decode_packet)
 def announce_parse(packet):
     keysize = 64
@@ -333,6 +374,48 @@ def announce_parse(packet):
     out['valid'] = _ed25519_validate(out['key_pub_signature'], out['signature'], signed_data)
 
     return out
+
+
+def announce_create(announce_data, identity):
+    keysize = 64
+    per_keysize = 32
+    data = identity['public']['encrypt'] + identity['public']['sign']
+    name_hash = announce_data.get('name_hash', b'')
+    if len(name_hash) != 10:
+        raise ValueError("name_hash must be exactly 10 bytes")
+    data += name_hash
+    random_hash = announce_data.get('random_hash', b'')
+    if len(random_hash) != 10:
+        raise ValueError("random_hash must be exactly 10 bytes")
+    data += random_hash
+    destination_hash = announce_data.get('destination_hash', b'')
+    if len(destination_hash) != 16:
+        raise ValueError("destination_hash must be exactly 16 bytes")
+    app_data = announce_data.get('app_data', b'')
+    ratchet_pub = announce_data.get('ratchet_pub', None)
+    if ratchet_pub is not None:
+        if len(ratchet_pub) != 32:
+            raise ValueError("ratchet_pub must be exactly 32 bytes")
+        signing_ratchet = ratchet_pub
+    else:
+        signing_ratchet = identity['public']['encrypt']
+    signed_data = (
+        destination_hash +
+        identity['public']['encrypt'] +
+        identity['public']['sign'] +
+        name_hash +
+        random_hash +
+        signing_ratchet +
+        app_data
+    )
+    signature = _ed25519_sign(signed_data, identity['private']['sign'], identity['public']['sign'])
+    if ratchet_pub is not None:
+        data += ratchet_pub
+    data += signature
+    data += app_data
+    return data
+
+
 
 # get the message-id (used as destination in PROOFs) from a DATA packet (output from decode_packet)
 def get_message_id(packet):
