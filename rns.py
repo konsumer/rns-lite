@@ -1,5 +1,6 @@
-# Lightweight Reticulum library
-# https://github.com/konsumer/rns-lite
+"""
+Lightweight Reticulum library
+"""
 
 import sys
 from os import urandom
@@ -39,13 +40,12 @@ CONTEXT_LRPROOF        = 0xFF   # Packet is a link request proof
 if sys.implementation.name == "micropython":
     from cryptolib import aes
 
-    # pypi
+    # from pypi
     import x25519
 
-    # https://ed25519.cr.yp.to/python/ed25519.py
+    # from https://ed25519.cr.yp.to/python/ed25519.py
     import ed25519
 
-    # load private keys for encrypt/sign and derive public
     def get_identity_from_bytes(private_identity_bytes):
         encryption_private = private_identity_bytes[:32]
         signing_private = private_identity_bytes[32:64]
@@ -53,7 +53,6 @@ if sys.implementation.name == "micropython":
         signing_public = ed25519.publickey(signing_private)
         return {'public': { 'encrypt': encryption_public, 'sign': signing_public }, 'private': { 'encrypt': encryption_private, 'sign': signing_private }}
 
-    # create a full identity (pub/private encrypt/sign)
     def identity_create():
         encryption_private = urandom(32)
         signing_private = urandom(32)
@@ -61,11 +60,9 @@ if sys.implementation.name == "micropython":
         signing_public = ed25519.publickey(signing_private)
         return {'public': { 'encrypt': encryption_public, 'sign': signing_public }, 'private': { 'encrypt': encryption_private, 'sign': signing_private }}
 
-    # generate ratchet private key
     def ratchet_create_new():
         return urandom(32)
 
-    # get the public key for ratchet (for use in announces)
     def ratchet_get_public(private_ratchet):
         return x25519.scalar_base_mult(private_ratchet)
 
@@ -117,8 +114,10 @@ else:
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
     from cryptography.hazmat.primitives import serialization
 
-    # load private keys for encrypt/sign and derive public
     def get_identity_from_bytes(private_identity_bytes):
+        """
+        Load private keys for encrypt/sign and derive public.
+        """
         encryption_private = private_identity_bytes[:32]
         signing_private = private_identity_bytes[32:64]
         encrypt_key = X25519PrivateKey.from_private_bytes(encryption_private)
@@ -133,8 +132,10 @@ else:
         )
         return {'public': {'encrypt': encryption_public, 'sign': signing_public }, 'private': { 'encrypt': encryption_private, 'sign': signing_private }}
 
-    # create a full identity (pub/private encrypt/sign)
     def identity_create():
+        """
+        Create a full identity (pub/private encrypt/sign.)
+        """
         encrypt_key = X25519PrivateKey.generate()
         encryption_private = encrypt_key.private_bytes(encoding=serialization.Encoding.Raw, format=serialization.PrivateFormat.Raw, encryption_algorithm=serialization.NoEncryption())
         encryption_public = encrypt_key.public_key().public_bytes(encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw)
@@ -143,8 +144,10 @@ else:
         signing_public = sign_key.public_key().public_bytes(encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw)
         return { 'public': { 'encrypt': encryption_public, 'sign': signing_public }, 'private': { 'encrypt': encryption_private, 'sign': signing_private} }
 
-    # generate ratchet private key
     def ratchet_create_new():
+        """
+        Generate new ratchet private key.
+        """
         key = X25519PrivateKey.generate()
         return key.private_bytes(
             encoding=serialization.Encoding.Raw,
@@ -152,8 +155,10 @@ else:
             encryption_algorithm=serialization.NoEncryption()
         )
 
-    # get the public key for ratchet (for use in announces)
     def ratchet_get_public(private_ratchet):
+        """
+        Get the public key for ratchet (for use in announces.)
+        """
         key = X25519PrivateKey.from_private_bytes(private_ratchet)
         return key.public_key().public_bytes(
             encoding=serialization.Encoding.Raw,
@@ -238,8 +243,10 @@ def _pkcs7_pad(data, bs=16):
     v = bytes([n])
     return data + v * n
 
-# get the destination-hash (LXMF address) from identity
 def get_destination_hash(identity, app_name, *aspects):
+    """
+    Get the destination-hash (LXMF address) from identity.
+    """
     identity_hash = _sha256(identity['public']['encrypt'] + identity['public']['sign'])[:16]
     full_name = app_name
     for aspect in aspects:
@@ -249,8 +256,10 @@ def get_destination_hash(identity, app_name, *aspects):
     destination_hash = _sha256(addr_hash_material)[:16]
     return destination_hash
 
-# extract basic reticulum fields
 def decode_packet(packet_bytes):
+    """
+    Extract basic reticulum fields (packet-object) from bytes.
+    """
     result = {}
     result["raw"] = packet_bytes
 
@@ -285,6 +294,9 @@ def decode_packet(packet_bytes):
     return result
 
 def encode_packet(packet):
+    """
+    Given a packaet-object, output bytes.
+    """
     header_byte = 0
     source_hash = packet.get('source_hash', False)
     if souce_hash:
@@ -318,8 +330,10 @@ def encode_packet(packet):
     return packet_bytes
 
 
-# parse an ANNOUNCE packet (output from decode_packet)
 def announce_parse(packet):
+    """
+    Parse an ANNOUNCE packet (output from decode_packet) into announce-object.
+    """
     keysize = 64
     per_keysize = keysize // 2  # 32
     ratchetsize = 32
@@ -377,6 +391,9 @@ def announce_parse(packet):
 
 
 def announce_create(announce_data, identity):
+    """
+    Create packet object from announce-object.
+    """
     keysize = 64
     per_keysize = 32
     data = identity['public']['encrypt'] + identity['public']['sign']
@@ -417,8 +434,10 @@ def announce_create(announce_data, identity):
 
 
 
-# get the message-id (used as destination in PROOFs) from a DATA packet (output from decode_packet)
 def get_message_id(packet):
+    """
+    Get the message-id (used as destination in PROOFs) from a DATA packet (output from decode_packet.)
+    """
     header_type = (packet['raw'][0] >> 6) & 0b11
     hashable_part = bytes([packet['raw'][0] & 0b00001111])
     if header_type == 1:
@@ -427,14 +446,15 @@ def get_message_id(packet):
         hashable_part += packet['raw'][2:]
     return _sha256(hashable_part)
 
-# validate a PROOF packet (output from decode_packet)
 def proof_validate(packet, identity, full_packet_hash):
+    """
+    Validate a PROOF packet (output from decode_packet.)
+    """
     return _ed25519_validate(identity['public']['sign'], packet['data'][1:65], full_packet_hash)
 
-# decrypt a DATA packet (output from decode_packet)
 def message_decrypt(packet, identity, ratchets=None):
     """
-    Decrypt a message packet using identity's private key and optional ratchets.
+    Decrypt a DATA message packet using identity's private key and optional ratchets.
     """
     identity_hash = _sha256(identity['public']['encrypt'] + identity['public']['sign'])[:16]
 
