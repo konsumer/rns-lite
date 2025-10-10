@@ -12,7 +12,6 @@ PACKET_ANNOUNCE     = 0x01     # Announces
 PACKET_LINKREQUEST  = 0x02     # Link requests
 PACKET_PROOF        = 0x03     # Proofs
 
-
 CONTEXT_NONE           = 0x00   # Generic data packet
 CONTEXT_RESOURCE       = 0x01   # Packet is part of a resource
 CONTEXT_RESOURCE_ADV   = 0x02   # Packet is a resource advertisement
@@ -34,6 +33,17 @@ CONTEXT_LINKCLOSE      = 0xFC   # Packet is a link close message
 CONTEXT_LINKPROOF      = 0xFD   # Packet is a link packet proof
 CONTEXT_LRRTT          = 0xFE   # Packet is a link request round-trip time measurement
 CONTEXT_LRPROOF        = 0xFF   # Packet is a link request proof
+
+# Destination types
+DEST_SINGLE = 0x00
+DEST_GROUP = 0x01
+DEST_PLAIN = 0x02
+DEST_LINK = 0x03
+
+# Transport types
+TRANSPORT_BROADCAST = 0
+TRANSPORT_TRANSPORT = 1
+
 
 
 # micropython has simpler/different hashing & crypto stuff, so we abstract the basic helpers
@@ -102,7 +112,7 @@ if sys.implementation.name == "micropython":
     def _x25519_exchange(private_key, public_key):
         return x25519.scalar_mult(private_key, public_key)
 
-    def _x25519_sign(signed_data, sign_key_priv, sign_key_pub):
+    def _ed25519_sign(signed_data, sign_key_priv, sign_key_pub):
         return ed25519.signature(signed_data, sign_key_priv, sign_key_pub)
 
 else:
@@ -192,7 +202,7 @@ else:
         shared_secret = prv_key_obj.exchange(pub_key_obj)
         return shared_secret
 
-    def _x25519_sign(signed_data, sign_key_priv, sign_key_pub):
+    def _ed25519_sign(signed_data, sign_key_priv, sign_key_pub):
         sign_key = Ed25519PrivateKey.from_private_bytes(sign_key_priv)
         return sign_key.sign(signed_data)
 
@@ -295,11 +305,11 @@ def decode_packet(packet_bytes):
 
 def encode_packet(packet):
     """
-    Given a packaet-object, output bytes.
+    Given a packet-object, output bytes.
     """
     header_byte = 0
     source_hash = packet.get('source_hash', False)
-    if souce_hash:
+    if source_hash:
         packet['header_type'] = 1
     if packet.get('ifac_flag', False):
         header_byte |= 0b10000000
@@ -322,12 +332,62 @@ def encode_packet(packet):
     packet_bytes += destination_hash
     if source_hash:
         packet_bytes += source_hash
-    if packet.get('context_flag', False):
-        context = packet.get('context', 0) & 0xFF
-        packet_bytes += bytes([context])
+    
+    # Add context byte (REQUIRED for all packets in official RNS)
+    context = packet.get('context', 0) & 0xFF
+    packet_bytes += bytes([context])
+    
     data = packet.get('data', b'')
     packet_bytes += data
     return packet_bytes
+
+
+def build_announce(identity, destination, name='lxmf.delivery', ratchet_pub=None, app_data=None):
+    from os import urandom
+    
+    pub_encrypt = identity['public']['encrypt']
+    pub_sign = identity['public']['sign']
+    
+    if len(pub_encrypt) != 32 or len(pub_sign) != 32:
+        raise ValueError("Keys must be 32 bytes")
+    
+    public_key = pub_encrypt + pub_sign
+    random_hash = urandom(10)
+    
+    # Build signed_data: destination + public_key + random_hash + [app_data/ratchet]
+    signed_data = destination + public_key + random_hash
+    
+    # Combine app_data and ratchet into extras that will be signed
+    extras = b''
+    if app_data is not None:
+        if isinstance(app_data, str):
+            app_data = app_data.encode('utf-8')
+        extras += app_data
+    
+    if ratchet_pub is not None:
+        if len(ratchet_pub) != 32:
+            raise ValueError("ratchet_pub must be 32 bytes")
+        extras += ratchet_pub
+    
+    # Add extras to signed_data
+    if extras:
+        signed_data += extras
+    
+    # Sign
+    signature = _ed25519_sign(signed_data, identity['private']['sign'], identity['public']['sign'])
+    
+    # Build announce_data: public_key + random_hash + signature + extras
+    announce_data = public_key + random_hash + signature + extras
+    
+    return encode_packet({
+        'destination_hash': destination,
+        'packet_type': PACKET_ANNOUNCE,
+        'destination_type': DEST_SINGLE << 2,
+        'hops': 0,
+        'context': 0,
+        'data': announce_data
+    })
+
 
 
 def announce_parse(packet):
@@ -388,51 +448,6 @@ def announce_parse(packet):
     out['valid'] = _ed25519_validate(out['key_pub_signature'], out['signature'], signed_data)
 
     return out
-
-
-def announce_create(announce_data, identity):
-    """
-    Create packet object from announce-object.
-    """
-    keysize = 64
-    per_keysize = 32
-    data = identity['public']['encrypt'] + identity['public']['sign']
-    name_hash = announce_data.get('name_hash', b'')
-    if len(name_hash) != 10:
-        raise ValueError("name_hash must be exactly 10 bytes")
-    data += name_hash
-    random_hash = announce_data.get('random_hash', b'')
-    if len(random_hash) != 10:
-        raise ValueError("random_hash must be exactly 10 bytes")
-    data += random_hash
-    destination_hash = announce_data.get('destination_hash', b'')
-    if len(destination_hash) != 16:
-        raise ValueError("destination_hash must be exactly 16 bytes")
-    app_data = announce_data.get('app_data', b'')
-    ratchet_pub = announce_data.get('ratchet_pub', None)
-    if ratchet_pub is not None:
-        if len(ratchet_pub) != 32:
-            raise ValueError("ratchet_pub must be exactly 32 bytes")
-        signing_ratchet = ratchet_pub
-    else:
-        signing_ratchet = identity['public']['encrypt']
-    signed_data = (
-        destination_hash +
-        identity['public']['encrypt'] +
-        identity['public']['sign'] +
-        name_hash +
-        random_hash +
-        signing_ratchet +
-        app_data
-    )
-    signature = _ed25519_sign(signed_data, identity['private']['sign'], identity['public']['sign'])
-    if ratchet_pub is not None:
-        data += ratchet_pub
-    data += signature
-    data += app_data
-    return data
-
-
 
 def get_message_id(packet):
     """
