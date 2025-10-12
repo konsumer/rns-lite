@@ -343,51 +343,51 @@ def encode_packet(packet):
 
 
 def build_announce(identity, destination, name='lxmf.delivery', ratchet_pub=None, app_data=None):
-    from os import urandom
-    
-    pub_encrypt = identity['public']['encrypt']
-    pub_sign = identity['public']['sign']
-    
-    if len(pub_encrypt) != 32 or len(pub_sign) != 32:
+    pub_enc = identity['public']['encrypt']
+    pub_sig = identity['public']['sign']
+    if len(pub_enc) != 32 or len(pub_sig) != 32:
         raise ValueError("Keys must be 32 bytes")
-    
-    public_key = pub_encrypt + pub_sign
+
+    keys = pub_enc + pub_sig
+    name_hash = hashlib.sha256(name.encode('utf-8')).digest()[:10]
     random_hash = urandom(10)
-    
-    # Build signed_data: destination + public_key + random_hash + [app_data/ratchet]
-    signed_data = destination + public_key + random_hash
-    
-    # Combine app_data and ratchet into extras that will be signed
-    extras = b''
-    if app_data is not None:
-        if isinstance(app_data, str):
-            app_data = app_data.encode('utf-8')
-        extras += app_data
-    
-    if ratchet_pub is not None:
+
+    if app_data is None:
+        app_data = b''
+    elif isinstance(app_data, str):
+        app_data = app_data.encode('utf-8')
+
+    # Determine the ratchet key to use
+    if ratchet_pub is None or ratchet_pub == pub_enc:
+        effective_ratchet = pub_enc
+        context_val = 0
+    else:
         if len(ratchet_pub) != 32:
             raise ValueError("ratchet_pub must be 32 bytes")
-        extras += ratchet_pub
-    
-    # Add extras to signed_data
-    if extras:
-        signed_data += extras
-    
-    # Sign
+        effective_ratchet = ratchet_pub
+        context_val = 1
+
+    # Signature includes ratchet
+    signed_data = destination + keys + name_hash + random_hash + effective_ratchet + app_data
     signature = _ed25519_sign(signed_data, identity['private']['sign'], identity['public']['sign'])
-    
-    # Build announce_data: public_key + random_hash + signature + extras
-    announce_data = public_key + random_hash + signature + extras
-    
-    return encode_packet({
+
+    # Payload structure depends on context
+    if context_val == 1:
+        payload = keys + name_hash + random_hash + effective_ratchet + signature + app_data
+    else:
+        payload = keys + name_hash + random_hash + signature + app_data
+
+    pkt = {
         'destination_hash': destination,
         'packet_type': PACKET_ANNOUNCE,
-        'destination_type': DEST_SINGLE << 2,
+        'destination_type': 0,
         'hops': 0,
-        'context': 0,
-        'data': announce_data
-    })
+        'data': payload,
+        'context': context_val,
+        'context_flag': True  # <-- MUST SET THIS!
+    }
 
+    return encode_packet(pkt)
 
 
 def announce_parse(packet):
