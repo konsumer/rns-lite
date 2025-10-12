@@ -304,42 +304,51 @@ def decode_packet(packet_bytes):
     return result
 
 def encode_packet(packet):
-    """
-    Given a packet-object, output bytes.
-    """
     header_byte = 0
-    source_hash = packet.get('source_hash', False)
+
+    source_hash = packet.get('source_hash')
     if source_hash:
         packet['header_type'] = 1
-    if packet.get('ifac_flag', False):
+
+    if packet.get('ifac_flag'):
         header_byte |= 0b10000000
-    if packet.get('header_type', False):
+    if packet.get('header_type'):
         header_byte |= 0b01000000
-    if packet.get('context_flag', False):
+
+    has_context = ('context' in packet)
+    if has_context:
+        packet['context_flag'] = True
+    if packet.get('context_flag'):
         header_byte |= 0b00100000
-    if packet.get('propagation_type', False):
+
+    if packet.get('propagation_type'):
         header_byte |= 0b00010000
+
     destination_type = packet.get('destination_type', 0) & 0b00001100
     header_byte |= destination_type
+
     packet_type = packet.get('packet_type', 0) & 0b00000011
     header_byte |= packet_type
-    packet_bytes = bytes([header_byte])
-    hops = packet.get('hops', 0) & 0xFF
-    packet_bytes += bytes([hops])
-    destination_hash = packet.get('destination_hash', b'')
-    if len(destination_hash) != 16:
-        raise ValueError("destination_hash must be exactly 16 bytes")
-    packet_bytes += destination_hash
+
+    out = bytearray()
+    out.append(header_byte)
+    out.append(packet.get('hops', 0) & 0xFF)
+
+    dest = packet.get('destination_hash', b'')
+    if len(dest) != 16:
+        raise ValueError("destination_hash must be 16 bytes")
+    out += dest
+
     if source_hash:
-        packet_bytes += source_hash
-    
-    # Add context byte (REQUIRED for all packets in official RNS)
-    context = packet.get('context', 0) & 0xFF
-    packet_bytes += bytes([context])
-    
-    data = packet.get('data', b'')
-    packet_bytes += data
-    return packet_bytes
+        if len(source_hash) != 16:
+            raise ValueError("source_hash must be 16 bytes")
+        out += source_hash
+
+    if packet.get('context_flag'):
+        out.append(packet.get('context', 0) & 0xFF)
+
+    out += packet.get('data', b'')
+    return bytes(out)
 
 
 def build_announce(identity, destination, name='lxmf.delivery', ratchet_pub=None, app_data=None):
@@ -349,7 +358,7 @@ def build_announce(identity, destination, name='lxmf.delivery', ratchet_pub=None
         raise ValueError("Keys must be 32 bytes")
 
     keys = pub_enc + pub_sig
-    name_hash = hashlib.sha256(name.encode('utf-8')).digest()[:10]
+    name_hash = _sha256(name.encode('utf-8'))[:10]
     random_hash = urandom(10)
 
     if app_data is None:
@@ -367,14 +376,16 @@ def build_announce(identity, destination, name='lxmf.delivery', ratchet_pub=None
         effective_ratchet = ratchet_pub
         context_val = 1
 
-    # Signature includes ratchet
+    # Signature includes: destination + keys + name_hash + random_hash + ratchet + app_data
     signed_data = destination + keys + name_hash + random_hash + effective_ratchet + app_data
     signature = _ed25519_sign(signed_data, identity['private']['sign'], identity['public']['sign'])
 
     # Payload structure depends on context
     if context_val == 1:
+        # Explicit ratchet: keys + name_hash + random_hash + ratchet + signature + app_data
         payload = keys + name_hash + random_hash + effective_ratchet + signature + app_data
     else:
+        # Implicit ratchet: keys + name_hash + random_hash + signature + app_data
         payload = keys + name_hash + random_hash + signature + app_data
 
     pkt = {
@@ -384,11 +395,10 @@ def build_announce(identity, destination, name='lxmf.delivery', ratchet_pub=None
         'hops': 0,
         'data': payload,
         'context': context_val,
-        'context_flag': True  # <-- MUST SET THIS!
+        'context_flag': True  # Critical: must set this for context byte to be written
     }
 
     return encode_packet(pkt)
-
 
 def announce_parse(packet):
     """
