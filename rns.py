@@ -530,4 +530,42 @@ def message_decrypt(packet, identity, ratchets=None):
     return None
 
 
-
+def build_proof(identity, packet, message_id=None):
+    """
+    Build a PROOF packet in response to a received DATA packet.
+    
+    Args:
+        identity: Your identity dict with private/public keys
+        packet: The decoded DATA packet dict (from decode_packet)
+        message_id: Optional pre-calculated message ID (32 bytes). If None, will be calculated.
+    
+    Returns:
+        Encoded PROOF packet bytes
+    """
+    PACKET_PROOF = 0b00000011
+    
+    # Calculate message_id if not provided
+    if message_id is None:
+        message_id = get_message_id(packet)
+    
+    # The destination for the PROOF is the truncated message_id (first 16 bytes)
+    proof_destination = message_id[:16]
+    
+    # Sign the full 32-byte message_id with your signing key
+    signature = _ed25519_sign(message_id, identity['private']['sign'], identity['public']['sign'])
+    
+    # PROOF data format: proof_type + signature
+    # proof_type = 0x00 (not 0x01!)
+    proof_data = bytes([0x00]) + signature
+    
+    # Build the PROOF packet - NO context flag!
+    pkt = {
+        'destination_hash': proof_destination,
+        'packet_type': PACKET_PROOF,
+        'destination_type': 0,
+        'hops': 0,
+        'data': proof_data
+        # No context or context_flag!
+    }
+    
+    return encode_packet(pkt)
