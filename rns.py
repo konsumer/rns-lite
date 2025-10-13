@@ -524,7 +524,6 @@ def message_decrypt(packet, identity, ratchets=None):
                 ciphertext_data = ciphertext[16:-32]
                 padded_plaintext = _aes_cbc_decrypt(encryption_key, iv, ciphertext_data)
                 plaintext = _pkcs7_unpad(padded_plaintext)
-                
                 return plaintext
                 
             except Exception:
@@ -673,80 +672,67 @@ def build_data(identity, recipient_announce, plaintext, ratchet=None):
     
     return encode_packet(pkt)
 
+
+
+def build_lxmf_message(my_identity, my_dest, my_ratchet, recipient_announce, message):
+    """Build LXMF message - destination is stripped before encryption."""
+    recipient_dest = recipient_announce['destination_hash']
+    
+    # Prepare message
+    timestamp = message.get('timestamp', time.time())
+    title = message.get('title', b'')
+    if isinstance(title, str):
+        title = title.encode('utf-8')
+    content = message.get('content', b'')
+    if isinstance(content, str):
+        content = content.encode('utf-8')
+    fields = {k: v for k, v in message.items() 
+              if k not in ['timestamp', 'title', 'content']}
+    
+    payload = [timestamp, title, content, fields]
+    packed_payload = packb(payload)
+    
+    # Calculate hash with destination included
+    hashed_part = recipient_dest + my_dest + packed_payload
+    message_hash = hashlib.sha256(hashed_part).digest()
+    
+    # Sign: hashed_part + message_hash
+    signed_part = hashed_part + message_hash
+    signature = _ed25519_sign(
+        signed_part,
+        my_identity['private']['sign'],
+        my_identity['public']['sign']
+    )
+    
+    # Build LXMF WITHOUT destination (it's stripped for encryption)
+    # Format: source + signature + packed_payload
+    lxmf_message = my_dest + signature + packed_payload
+    
+    return build_data(my_identity, recipient_announce, lxmf_message, my_ratchet)
+
+
 def parse_lxmf_message(plaintext):
     """
-    Parse LXMF message from decrypted DATA packet.
-    
-    Structure:
-    - source_hash (16 bytes)
-    - destination_hash (16 bytes)  
-    - lxmf_data (48 bytes) - signature or other LXMF fields
-    - msgpack payload (timestamp, title, content, fields)
+    Parse LXMF message from encrypted DATA packet.
+    The destination is inferred from the packet, so encrypted payload is:
+    source (16) + signature (64) + msgpack
     """
-
+    
+    # Structure: source (16) + signature (64) + msgpack
     source_hash = plaintext[0:16]
-    destination_hash = plaintext[16:32]
-    lxmf_signature = plaintext[32:80]
+    signature = plaintext[16:80]
+    
+    # Msgpack starts at byte 80
     timestamp, title, content, fields = unpackb(plaintext[80:])
     
+    # We don't have destination in the encrypted payload - it's inferred from DATA packet
     return {
         **fields,
         'source_hash': source_hash,
-        'destination_hash': destination_hash,
-        'signature': lxmf_signature,
+        'signature': signature,
         'timestamp': timestamp,
         'title': title,
         'content': content
     }
 
-def build_lxmf_message(identity, my_dest, ratchet, recipient_announce, message):
-    """
-    Build an encrypted LXMF message.
-    
-    Args:
-        identity: Your identity dict with public/private keys
-        ratchet: Your ratchet private key (32 bytes)
-        recipient_announce: Parsed announce dict from announce_parse()
-        message: Dict with 'title', 'content', 'timestamp' (optional), and any other fields
-    
-    Returns:
-        Encoded DATA packet bytes ready to send
-    """
-    
-    # Get destination hashes
-    recipient_dest = recipient_announce['destination_hash']
-    
-    # Build LXMF message structure
-    source_hash = my_dest  # 16 bytes
-    destination_hash = recipient_dest  # 16 bytes
-    
-    # Extract message fields
-    timestamp = message.get('timestamp', time.time())
-    title = message.get('title', b'')
-    if isinstance(title, str):
-        title = title.encode('utf-8')
-    
-    content = message.get('content', b'')
-    if isinstance(content, str):
-        content = content.encode('utf-8')
-    
-    # Get any additional fields (spread remaining keys)
-    fields = {k: v for k, v in message.items() if k not in ['timestamp', 'title', 'content']}
-    
-    # Create msgpack payload
-    msgpack_payload = packb((timestamp, title, content, fields))
-    
-    # Sign the message (for now, placeholder - should be Ed25519 signature)
-    # Signature should cover: source + dest + msgpack_payload
-    signature_data = source_hash + destination_hash + msgpack_payload
-    lxmf_signature = _ed25519_sign(signature_data, identity['private']['sign'], identity['public']['sign'])
-    
-    # Pad signature to 48 bytes if needed (Ed25519 is 64 bytes, so truncate or use different format)
-    # Based on your observation, it's 48 bytes, so let's use first 48 bytes
-    lxmf_signature = lxmf_signature[:48]
-    
-    # Build complete LXMF plaintext: source (16) + dest (16) + signature (48) + msgpack
-    plaintext = source_hash + destination_hash + lxmf_signature + msgpack_payload
-    
-    # Encrypt and build DATA packet
-    return build_data(identity, recipient_announce, plaintext, ratchet)
+
