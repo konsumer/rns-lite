@@ -45,8 +45,6 @@ DEST_LINK = 0x03
 TRANSPORT_BROADCAST = 0
 TRANSPORT_TRANSPORT = 1
 
-
-
 # micropython has simpler/different hashing & crypto stuff, so we abstract the basic helpers
 if sys.implementation.name == "micropython":
     from cryptolib import aes
@@ -56,6 +54,9 @@ if sys.implementation.name == "micropython":
 
     # from https://ed25519.cr.yp.to/python/ed25519.py
     import ed25519
+
+    # from https://github.com/peterhinch/micropython-msgpack
+    from umsgpack import loads as unpackb, dumps as packb
 
     def get_identity_from_bytes(private_identity_bytes):
         encryption_private = private_identity_bytes[:32]
