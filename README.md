@@ -64,6 +64,10 @@ def get_message_id(packet)
 
 Get the message-id (used as destination in PROOFs) from a DATA packet (output from decode_packet.)
 
+**Arguments**:
+
+- `packet` - packet dictionary (output from `decode_packet`)
+
 **Returns**:
 
 Bytes for message-id (used in PROOF.)
@@ -93,6 +97,16 @@ def message_decrypt(packet, identity, ratchets=None)
 ```
 
 Decrypt a DATA message packet using identity's private key and optional ratchets.
+
+**Arguments**:
+
+- `packet` - The decoded DATA packet dict (from decode_packet)
+- `identity` - Your identity dict with private/public keys
+- `ratchets` - Optional array of ratchets (private-key bytes, output from ratchet_create_new)
+
+**Returns**:
+
+Returns decrypted bytes
 
 ### build_proof
 
@@ -137,7 +151,7 @@ Encoded DATA packet bytes
 def build_lxmf_message(my_identity, my_dest, my_ratchet, recipient_announce, message)
 ```
 
-Build LXMF message - destination is stripped before encryption.
+Build LXMF message
 
 **Arguments**:
 
@@ -145,7 +159,7 @@ Build LXMF message - destination is stripped before encryption.
 - `my_dest` - Bytes of destination address (output from `get_destination_hash`)
 - `my_ratchet` - Your ratchet private key (32 bytes). If None, uses your identity encrypt key.
 - `recipient_announce` - The parsed announce dict from announce_parse() containing recipient's keys
-- `message` - The message object (title, content, etc)
+- `message` - The message dictionary (title, content, etc)
 
 **Returns**:
 

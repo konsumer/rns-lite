@@ -676,7 +676,7 @@ def build_data(identity, recipient_announce, plaintext, ratchet=None):
 
 
 def build_lxmf_message(my_identity, my_dest, my_ratchet, recipient_announce, message):
-    """Build LXMF message - destination is stripped before encryption."""
+    """Build LXMF message"""
     recipient_dest = recipient_announce['destination_hash']
     
     # Prepare message
@@ -704,11 +704,8 @@ def build_lxmf_message(my_identity, my_dest, my_ratchet, recipient_announce, mes
         my_identity['private']['sign'],
         my_identity['public']['sign']
     )
-    
-    # Build LXMF WITHOUT destination (it's stripped for encryption)
-    # Format: source + signature + packed_payload
+
     lxmf_message = my_dest + signature + packed_payload
-    
     return build_data(my_identity, recipient_announce, lxmf_message, my_ratchet)
 
 
