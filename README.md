@@ -4,6 +4,202 @@ This is a light "BYO" version that is compatable, but missing transport, interfa
 
 The essential idea is that is has utilities for the basics, but no automatic-management of things, and much smaller/simpler. The hope is that it will be usable in constrained enviroments, like micropython. I am also working on [cyd-nomad](https://github.com/konsumer/cyd-nomad), for this purpose.
 
+## API
+
+<a id="rns.get_destination_hash"></a>
+
+#### get_destination_hash
+
+```python
+def get_destination_hash(identity, app_name, *aspects)
+```
+
+Get the destination-hash (LXMF address) from identity.
+
+<a id="rns.decode_packet"></a>
+
+#### decode_packet
+
+```python
+def decode_packet(packet_bytes)
+```
+
+Extract basic reticulum fields (packet-object) from bytes.
+
+<a id="rns.announce_parse"></a>
+
+#### announce_parse
+
+```python
+def announce_parse(packet)
+```
+
+Parse an ANNOUNCE packet (output from decode_packet) into announce-object.
+
+<a id="rns.get_message_id"></a>
+
+#### get_message_id
+
+```python
+def get_message_id(packet)
+```
+
+Get the message-id (used as destination in PROOFs) from a DATA packet (output from decode_packet.)
+
+<a id="rns.proof_validate"></a>
+
+#### proof_validate
+
+```python
+def proof_validate(packet, identity, full_packet_hash)
+```
+
+Validate a PROOF packet (output from decode_packet.)
+
+<a id="rns.message_decrypt"></a>
+
+#### message_decrypt
+
+```python
+def message_decrypt(packet, identity, ratchets=None)
+```
+
+Decrypt a DATA message packet using identity's private key and optional ratchets.
+
+<a id="rns.build_proof"></a>
+
+#### build_proof
+
+```python
+def build_proof(identity, packet, message_id=None)
+```
+
+Build a PROOF packet in response to a received DATA packet.
+
+**Arguments**:
+
+- `identity` - Your identity dict with private/public keys
+- `packet` - The decoded DATA packet dict (from decode_packet)
+- `message_id` - Optional pre-calculated message ID (32 bytes). If None, will be calculated.
+
+**Returns**:
+
+Encoded PROOF packet bytes
+
+<a id="rns.build_data"></a>
+
+#### build_data
+
+```python
+def build_data(identity, recipient_announce, plaintext, ratchet=None)
+```
+
+Build an encrypted DATA packet to send to a recipient.
+
+**Arguments**:
+
+- `identity` - Your identity dict with private/public keys
+- `recipient_announce` - The parsed announce dict from announce_parse() containing recipient's keys
+- `plaintext` - The message bytes to encrypt
+- `ratchet` - Your ratchet private key (32 bytes). If None, uses your identity encrypt key.
+
+**Returns**:
+
+Encoded DATA packet bytes
+
+<a id="rns.build_lxmf_message"></a>
+
+#### build_lxmf_message
+
+```python
+def build_lxmf_message(my_identity, my_dest, my_ratchet, recipient_announce, message)
+```
+
+Build LXMF message - destination is stripped before encryption.
+
+<a id="rns.parse_lxmf_message"></a>
+
+#### parse_lxmf_message
+
+```python
+def parse_lxmf_message(plaintext)
+```
+
+Parse LXMF message from encrypted DATA packet.
+source (16) + signature (64) + msgpack
+
+**Arguments**:
+
+- `plaintext` - Decrypted packet-data from a message DATA packet
+
+**Returns**:
+
+Dictionary with title/content/source_hash/signature/timestamp and any other fields.
+
+<a id="rns.get_identity_from_bytes"></a>
+
+#### get_identity_from_bytes
+
+```py
+def get_identity_from_bytes(private_identity_bytes)
+```
+
+Load private keys for encrypt/sign and derive public keys.
+
+**Arguments**:
+
+- `private_identity_bytes` - Bytes loaded from some other place (file, etc) that hold your private encryption/sign keys
+
+**Returns**:
+
+Dictionary with public/private sign/encrypt keys
+
+<a id="rns.identity_create"></a>
+
+#### identity_create
+
+```py
+def identity_create()
+```
+
+Create a full fresh identity (pub/private encrypt/sign.)
+
+**Returns**:
+
+Dictionary with public/private sign/encrypt keys
+
+<a id="rns.ratchet_create_new"></a>
+
+#### ratchet_create_new
+
+```py
+def ratchet_create_new()
+```
+
+Generate new ratchet private key.
+
+**Returns**:
+
+32 Bytes for a ratchet private-key
+
+<a id="rns.ratchet_get_public"></a>
+
+#### ratchet_get_public
+
+```py
+def ratchet_get_public(private_ratchet)
+```
+
+Get the public key for ratchet (for use in ANNOUNCEs.)
+
+**Arguments**:
+
+- `private_ratchet` - Bytes from private ratchet (output from ratchet_create_new)
+
+**Returns**:
+
+32 Bytes for a ratchet public-key
+
 ## Heltec v3
 
 I started with a Heltec v3. It should work great on other things, but that is what I had on-hand that already had a lora radio attached, for testing.
@@ -34,17 +230,15 @@ chip pins
 
 - load [esp32-s3 image](https://micropython.org/download/ESP32_GENERIC_S3/)
 
-
 When working with python, I have a global venv I automatically activate in my .zshrc. For most "regular things" I like to just keep it all in one place, and it makes it easier to find the source for libraries & tools. It's also easier to wipe it all, and it keeps the version locked into a single root (on mac, for example, you might have several python runtimes.)
 
 ```sh
 # make a fresh venv
-python3 -m venv ~/.venv-global
+python -m venv ~/.venv-global
 
 # activate. put this in your shell-config
 source  ~/.venv-global/bin/activate
 ```
-
 
 ```sh
 # install ESP32 CLI tools
