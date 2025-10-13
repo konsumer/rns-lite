@@ -12,7 +12,17 @@ The essential idea is that is has utilities for the basics, but no automatic-man
 def get_destination_hash(identity, app_name, *aspects)
 ```
 
-Get the destination-hash (LXMF address) from identity.
+Get the destination-hash (LXMF address) from identity. A common app_name/aspect is `"lxmf", "delivery"`
+
+**Arguments**:
+
+- `identity` - Your identity dict with private/public keys
+- `app_name` - String name of app.
+- `*aspects` - Anything else gets joined into app_name with `.`
+
+**Returns**:
+
+Bytes for a destination-hash (address.)
 
 #### decode_packet
 
@@ -22,13 +32,29 @@ def decode_packet(packet_bytes)
 
 Extract basic reticulum fields (packet-object) from bytes.
 
+**Arguments**:
+
+- `packet_bytes` - Raw bytes for a packet (without framing)
+
+**Returns**:
+
+Dictionary of basic fields (data, packet_type, destination_type, etc)
+
 #### announce_parse
 
 ```python
 def announce_parse(packet)
 ```
 
-Parse an ANNOUNCE packet (output from decode_packet) into announce-object.
+Parse an ANNOUNCE packet into announce-object.
+
+**Arguments**:
+
+- `packet` - packet dictionary (output from `decode_packet`)
+
+**Returns**:
+
+Dictionary of announce-specifc fields (valid, signature, app_data, etc)
 
 #### get_message_id
 
@@ -44,7 +70,17 @@ Get the message-id (used as destination in PROOFs) from a DATA packet (output fr
 def proof_validate(packet, identity, full_packet_hash)
 ```
 
-Validate a PROOF packet (output from decode_packet.)
+Validate a PROOF packet.
+
+**Arguments**:
+
+- `packet` - packet dictionary (output from `decode_packet`)
+- `identity` - Your identity dict with private/public keys
+- `full_packet_hash` - message_id (un-truncated destination, so you should store what message-ids you send)
+
+**Returns**:
+
+Boolean of proof-validation.
 
 #### message_decrypt
 
@@ -267,3 +303,10 @@ import example_heltec_offline
 ```
 
 And you should see a decrypted message-packet on screen.
+
+### todo
+
+- seperate verify in ANNOUNCE, more like PROOF
+- Fully implement LINK
+- Node stuff (files, )
+- rnsh stuff
