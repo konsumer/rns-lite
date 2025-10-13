@@ -325,5 +325,5 @@ And you should see a decrypted message-packet on screen.
 
 - seperate verify in ANNOUNCE, more like PROOF
 - Fully implement LINK
-- Node stuff (files, )
+- Node stuff (files, etc)
 - rnsh stuff
