@@ -1,6 +1,17 @@
 # this will show that offline message-parsing works, and show it on the screen
 
 import rns
+from machine import Pin, SPI
+from machine import Pin, I2C
+import ssd1306
+
+i2c = I2C(sda=Pin(17), scl=Pin(18))
+oled = ssd1306.SSD1306_I2C(128, 64, i2c)
+pin_backlight = Pin(36, Pin.OUT)
+
+pin_backlight.value(0)
+oled.fill(0) 
+
 
 # shared data from real clients: [encrypt_key, sign_key]
 keys = {
@@ -41,6 +52,8 @@ recipients = { clientA_addr: clientA, clientB_addr: clientB }
 # track DATA packets that have been sent
 sent_packets = {} 
 
+offsety=0
+
 for packetBytes in packets:
     print("")
     packet = rns.decode_packet(packetBytes)
@@ -56,6 +69,7 @@ for packetBytes in packets:
             print("  Valid: Yes")
         else:
             print("  Valid: No")
+        oled.text(f"A: {packet['destination_hash'].hex()}", 0, offsety, 1)
 
 
     # decrypt DATA
@@ -71,6 +85,7 @@ for packetBytes in packets:
         print(f"  Time: {m['timestamp']}")
         print(f"  Title: {m['title']}")
         print(f"  Content: {m['content']}")
+        oled.text(f"M: {m['content'].decode("utf-8")}", 0, offsety, 1)
 
     # validate PROOF
     if packet['packet_type'] == rns.PACKET_PROOF:
@@ -80,7 +95,13 @@ for packetBytes in packets:
             identity = recipients[recipient_hash]
             if rns.proof_validate(packet, identity, full_packet_hash):
                 print('  Valid: Yes')
+                oled.text(f"P: OK", 0, offsety, 1)
             else:
                 print('  Valid: No')
+                oled.text(f"P: NO", 0, offsety, 1)
+            
         else:
             print(f"  No Message: {packet['destination_hash'].hex()}")
+            oled.text(f"P: ?", 0, offsety, 1)
+    oled.show()
+    offsety += 15
