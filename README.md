@@ -6,7 +6,7 @@ The essential idea is that is has utilities for the basics, but no automatic-man
 
 ## API
 
-#### get_destination_hash
+### get_destination_hash
 
 ```python
 def get_destination_hash(identity, app_name, *aspects)
@@ -24,7 +24,7 @@ Get the destination-hash (LXMF address) from identity. A common app_name/aspect 
 
 Bytes for a destination-hash (address.)
 
-#### decode_packet
+### decode_packet
 
 ```python
 def decode_packet(packet_bytes)
@@ -40,7 +40,7 @@ Extract basic reticulum fields (packet-object) from bytes.
 
 Dictionary of basic fields (data, packet_type, destination_type, etc)
 
-#### announce_parse
+### announce_parse
 
 ```python
 def announce_parse(packet)
@@ -56,7 +56,7 @@ Parse an ANNOUNCE packet into announce-object.
 
 Dictionary of announce-specifc fields (valid, signature, app_data, etc)
 
-#### get_message_id
+### get_message_id
 
 ```python
 def get_message_id(packet)
@@ -68,7 +68,7 @@ Get the message-id (used as destination in PROOFs) from a DATA packet (output fr
 
 Bytes for message-id (used in PROOF.)
 
-#### proof_validate
+### proof_validate
 
 ```python
 def proof_validate(packet, identity, full_packet_hash)
@@ -86,7 +86,7 @@ Validate a PROOF packet.
 
 Boolean of proof-validation.
 
-#### message_decrypt
+### message_decrypt
 
 ```python
 def message_decrypt(packet, identity, ratchets=None)
@@ -94,7 +94,7 @@ def message_decrypt(packet, identity, ratchets=None)
 
 Decrypt a DATA message packet using identity's private key and optional ratchets.
 
-#### build_proof
+### build_proof
 
 ```python
 def build_proof(identity, packet, message_id=None)
@@ -112,7 +112,7 @@ Build a PROOF packet in response to a received DATA packet.
 
 Encoded PROOF packet bytes
 
-#### build_data
+### build_data
 
 ```python
 def build_data(identity, recipient_announce, plaintext, ratchet=None)
@@ -131,7 +131,7 @@ Build an encrypted DATA packet to send to a recipient.
 
 Encoded DATA packet bytes
 
-#### build_lxmf_message
+### build_lxmf_message
 
 ```python
 def build_lxmf_message(my_identity, my_dest, my_ratchet, recipient_announce, message)
@@ -151,7 +151,7 @@ Build LXMF message - destination is stripped before encryption.
 
 Encoded DATA packet bytes
 
-#### parse_lxmf_message
+### parse_lxmf_message
 
 ```python
 def parse_lxmf_message(plaintext)
@@ -168,7 +168,7 @@ source (16) + signature (64) + msgpack
 
 Dictionary with title/content/source_hash/signature/timestamp and any other fields.
 
-#### get_identity_from_bytes
+### get_identity_from_bytes
 
 ```py
 def get_identity_from_bytes(private_identity_bytes)
@@ -184,7 +184,7 @@ Load private keys for encrypt/sign and derive public keys.
 
 Dictionary with public/private sign/encrypt keys
 
-#### identity_create
+### identity_create
 
 ```py
 def identity_create()
@@ -196,7 +196,7 @@ Create a full fresh identity (pub/private encrypt/sign.)
 
 Dictionary with public/private sign/encrypt keys
 
-#### ratchet_create_new
+### ratchet_create_new
 
 ```py
 def ratchet_create_new()
@@ -208,7 +208,7 @@ Generate new ratchet private key.
 
 32 Bytes for a ratchet private-key
 
-#### ratchet_get_public
+### ratchet_get_public
 
 ```py
 def ratchet_get_public(private_ratchet)
