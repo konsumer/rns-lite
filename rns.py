@@ -123,6 +123,7 @@ else:
     from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
     from cryptography.hazmat.primitives import serialization
+    from umsgpack import unpackb
 
     def get_identity_from_bytes(private_identity_bytes):
         """
@@ -569,3 +570,132 @@ def build_proof(identity, packet, message_id=None):
     }
     
     return encode_packet(pkt)
+
+
+def build_data(my_identity, recipient_announce, plaintext, my_ratchet=None):
+    """
+    Build an encrypted DATA packet to send to a recipient.
+    
+    Args:
+        my_identity: Your identity dict with private/public keys
+        recipient_announce: The parsed announce dict from announce_parse() containing recipient's keys
+        plaintext: The message bytes to encrypt
+        my_ratchet: Your ratchet private key (32 bytes). If None, uses your identity encrypt key.
+    
+    Returns:
+        Encoded DATA packet bytes
+    """
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    from cryptography.hazmat.backends import default_backend
+    import os
+    
+    PACKET_DATA = 0b00000000
+    
+    # Get recipient's identity hash for salt
+    recipient_identity_hash = hashlib.sha256(
+        recipient_announce['key_pub_encrypt'] + 
+        recipient_announce['key_pub_signature']
+    ).digest()[:16]
+    
+    # Use ratchet if provided, otherwise use identity encrypt key
+    if my_ratchet is None:
+        my_ratchet = my_identity['private']['encrypt']
+    
+    # Generate ephemeral keypair for this message
+    ephemeral_key = X25519PrivateKey.generate()
+    ephemeral_pub = ephemeral_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw
+    )
+    
+    # Perform key exchange with recipient's ratchet public key
+    shared_key = _x25519_exchange(
+        ephemeral_key.private_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PrivateFormat.Raw,
+            encryption_algorithm=serialization.NoEncryption()
+        ),
+        recipient_announce['ratchet_pub']
+    )
+    
+    # Derive encryption and signing keys
+    derived_key = _hkdf(
+        length=64,
+        derive_from=shared_key,
+        salt=recipient_identity_hash,
+        context=None
+    )
+    
+    signing_key = derived_key[:32]
+    encryption_key = derived_key[32:]
+    
+    # Pad plaintext
+    padded_plaintext = _pkcs7_pad(plaintext)
+    
+    # Generate random IV
+    iv = os.urandom(16)
+    
+    # Encrypt
+    ciphertext = _aes_cbc_encrypt(encryption_key, iv, padded_plaintext)
+    
+    # Create HMAC
+    signed_data = iv + ciphertext
+    hmac_sig = _hmac_sha256(signing_key, signed_data)
+    
+    # Build token: version_byte + ephemeral_pub + iv + ciphertext + hmac
+    token = bytes([0x00]) + ephemeral_pub + iv + ciphertext + hmac_sig
+    
+    # Get recipient's destination hash
+    recipient_dest = recipient_announce.get('destination_hash')
+    if not recipient_dest:
+        # If not in announce, calculate it
+        recipient_dest = get_destination_hash(
+            {
+                'public': {
+                    'encrypt': recipient_announce['key_pub_encrypt'],
+                    'sign': recipient_announce['key_pub_signature']
+                }
+            },
+            "lxmf",
+            "delivery"
+        )
+    
+    # Build DATA packet
+    pkt = {
+        'destination_hash': recipient_dest,
+        'packet_type': PACKET_DATA,
+        'destination_type': 0,
+        'hops': 0,
+        'data': token
+    }
+    
+    return encode_packet(pkt)
+
+def parse_lxmf_message(plaintext):
+    """
+    Parse LXMF message from decrypted DATA packet.
+    
+    Structure:
+    - source_hash (16 bytes)
+    - destination_hash (16 bytes)  
+    - lxmf_data (48 bytes) - signature or other LXMF fields
+    - msgpack payload (timestamp, title, content, fields)
+    """
+
+    source_hash = plaintext[0:16]
+    destination_hash = plaintext[16:32]
+    lxmf_signature = plaintext[32:80]
+    timestamp, title, content, fields = unpackb(plaintext[80:])
+    
+    return {
+        **fields,
+        'source_hash': source_hash,
+        'destination_hash': destination_hash,
+        'signature': lxmf_signature,
+        'timestamp': timestamp,
+        'title': title,
+        'content': content
+    }
