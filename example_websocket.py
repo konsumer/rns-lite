@@ -19,7 +19,6 @@ ratchet_pub = rns.ratchet_get_public(ratchet)
 announces = {}
 
 async def periodic_announce(websocket, interval=30):
-    """Send announce every interval seconds"""
     while True:
         try:
             print(f"Announcing myself: {me_dest.hex()}")
@@ -60,9 +59,22 @@ async def handle_incoming(websocket):
                     plaintext = rns.message_decrypt(packet, me, [ratchet])
                     if plaintext:
                         message = rns.parse_lxmf_message(plaintext)
+                        content_text = message['content'].decode('utf-8')
                         print(f"  From: {message['source_hash'].hex()}")
-                        print(f"  Title: {message['title']}")
-                        print(f"  Content: {message['content']}")
+                        print(f"  Title: {message['title'].decode('utf-8')}")
+                        print(f"  Content: {content_text}")
+
+                        # Send reply to sender
+                        if message['source_hash'] in announces:
+                            reply = {
+                                'title': 'EchoBot',
+                                'content': content_text
+                            } 
+                            await websocket.send(rns.build_lxmf_message(me, me_dest, ratchet, announces[ message['source_hash'] ], reply))
+                        else:
+                            print(f"  Cannot reply - no announce for {message['source_hash'].hex()}")
+
+
                     else:
                         print("  Could not decrypt")
         except Exception as e:

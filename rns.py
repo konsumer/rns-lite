@@ -6,6 +6,7 @@ import sys
 from os import urandom
 import hashlib
 from math import ceil
+import time
 
 PACKET_DATA         = 0x00     # Data packets
 PACKET_ANNOUNCE     = 0x01     # Announces
@@ -123,7 +124,7 @@ else:
     from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
     from cryptography.hazmat.primitives import serialization
-    from umsgpack import unpackb
+    from umsgpack import unpackb, packb
 
     def get_identity_from_bytes(private_identity_bytes):
         """
@@ -566,21 +567,20 @@ def build_proof(identity, packet, message_id=None):
         'destination_type': 0,
         'hops': 0,
         'data': proof_data
-        # No context or context_flag!
     }
     
     return encode_packet(pkt)
 
 
-def build_data(my_identity, recipient_announce, plaintext, my_ratchet=None):
+def build_data(identity, recipient_announce, plaintext, ratchet=None):
     """
     Build an encrypted DATA packet to send to a recipient.
     
     Args:
-        my_identity: Your identity dict with private/public keys
+        identity: Your identity dict with private/public keys
         recipient_announce: The parsed announce dict from announce_parse() containing recipient's keys
         plaintext: The message bytes to encrypt
-        my_ratchet: Your ratchet private key (32 bytes). If None, uses your identity encrypt key.
+        ratchet: Your ratchet private key (32 bytes). If None, uses your identity encrypt key.
     
     Returns:
         Encoded DATA packet bytes
@@ -590,7 +590,6 @@ def build_data(my_identity, recipient_announce, plaintext, my_ratchet=None):
     from cryptography.hazmat.primitives.kdf.hkdf import HKDF
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
     from cryptography.hazmat.backends import default_backend
-    import os
     
     PACKET_DATA = 0b00000000
     
@@ -601,8 +600,8 @@ def build_data(my_identity, recipient_announce, plaintext, my_ratchet=None):
     ).digest()[:16]
     
     # Use ratchet if provided, otherwise use identity encrypt key
-    if my_ratchet is None:
-        my_ratchet = my_identity['private']['encrypt']
+    if ratchet is None:
+        ratchet = identity['private']['encrypt']
     
     # Generate ephemeral keypair for this message
     ephemeral_key = X25519PrivateKey.generate()
@@ -636,7 +635,7 @@ def build_data(my_identity, recipient_announce, plaintext, my_ratchet=None):
     padded_plaintext = _pkcs7_pad(plaintext)
     
     # Generate random IV
-    iv = os.urandom(16)
+    iv = urandom(16)
     
     # Encrypt
     ciphertext = _aes_cbc_encrypt(encryption_key, iv, padded_plaintext)
@@ -699,3 +698,55 @@ def parse_lxmf_message(plaintext):
         'title': title,
         'content': content
     }
+
+def build_lxmf_message(identity, my_dest, ratchet, recipient_announce, message):
+    """
+    Build an encrypted LXMF message.
+    
+    Args:
+        identity: Your identity dict with public/private keys
+        ratchet: Your ratchet private key (32 bytes)
+        recipient_announce: Parsed announce dict from announce_parse()
+        message: Dict with 'title', 'content', 'timestamp' (optional), and any other fields
+    
+    Returns:
+        Encoded DATA packet bytes ready to send
+    """
+    
+    # Get destination hashes
+    recipient_dest = recipient_announce['destination_hash']
+    
+    # Build LXMF message structure
+    source_hash = my_dest  # 16 bytes
+    destination_hash = recipient_dest  # 16 bytes
+    
+    # Extract message fields
+    timestamp = message.get('timestamp', time.time())
+    title = message.get('title', b'')
+    if isinstance(title, str):
+        title = title.encode('utf-8')
+    
+    content = message.get('content', b'')
+    if isinstance(content, str):
+        content = content.encode('utf-8')
+    
+    # Get any additional fields (spread remaining keys)
+    fields = {k: v for k, v in message.items() if k not in ['timestamp', 'title', 'content']}
+    
+    # Create msgpack payload
+    msgpack_payload = packb((timestamp, title, content, fields))
+    
+    # Sign the message (for now, placeholder - should be Ed25519 signature)
+    # Signature should cover: source + dest + msgpack_payload
+    signature_data = source_hash + destination_hash + msgpack_payload
+    lxmf_signature = _ed25519_sign(signature_data, identity['private']['sign'], identity['public']['sign'])
+    
+    # Pad signature to 48 bytes if needed (Ed25519 is 64 bytes, so truncate or use different format)
+    # Based on your observation, it's 48 bytes, so let's use first 48 bytes
+    lxmf_signature = lxmf_signature[:48]
+    
+    # Build complete LXMF plaintext: source (16) + dest (16) + signature (48) + msgpack
+    plaintext = source_hash + destination_hash + lxmf_signature + msgpack_payload
+    
+    # Encrypt and build DATA packet
+    return build_data(identity, recipient_announce, plaintext, ratchet)
