@@ -230,6 +230,8 @@ I started with a Heltec v3. It should work great on other things, but that is wh
 
 ### hardware
 
+It runs on [esp32-s3 image](https://micropython.org/download/ESP32_GENERIC_S3/)
+
 screen:
 
 - ssd1306 i2c OLED
@@ -252,8 +254,6 @@ other pins:
 - BUSY = 13
 - DIO (also irq) = 14
 - onboard LED GPIO = 35
-
-It runs on [esp32-s3 image](https://micropython.org/download/ESP32_GENERIC_S3/)
 
 When working with python, I have a global venv I automatically activate in my .zshrc. For most "regular things" I like to just keep it all in one place, and it makes it easier to find the source for libraries & tools. It's also easier to wipe it all, and it keeps the version locked into a single root (on mac, for example, you might have several python runtimes.)
 
