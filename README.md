@@ -6,8 +6,6 @@ The essential idea is that is has utilities for the basics, but no automatic-man
 
 ## API
 
-<a id="rns.get_destination_hash"></a>
-
 #### get_destination_hash
 
 ```python
@@ -15,8 +13,6 @@ def get_destination_hash(identity, app_name, *aspects)
 ```
 
 Get the destination-hash (LXMF address) from identity.
-
-<a id="rns.decode_packet"></a>
 
 #### decode_packet
 
@@ -26,8 +22,6 @@ def decode_packet(packet_bytes)
 
 Extract basic reticulum fields (packet-object) from bytes.
 
-<a id="rns.announce_parse"></a>
-
 #### announce_parse
 
 ```python
@@ -35,8 +29,6 @@ def announce_parse(packet)
 ```
 
 Parse an ANNOUNCE packet (output from decode_packet) into announce-object.
-
-<a id="rns.get_message_id"></a>
 
 #### get_message_id
 
@@ -46,8 +38,6 @@ def get_message_id(packet)
 
 Get the message-id (used as destination in PROOFs) from a DATA packet (output from decode_packet.)
 
-<a id="rns.proof_validate"></a>
-
 #### proof_validate
 
 ```python
@@ -56,8 +46,6 @@ def proof_validate(packet, identity, full_packet_hash)
 
 Validate a PROOF packet (output from decode_packet.)
 
-<a id="rns.message_decrypt"></a>
-
 #### message_decrypt
 
 ```python
@@ -65,8 +53,6 @@ def message_decrypt(packet, identity, ratchets=None)
 ```
 
 Decrypt a DATA message packet using identity's private key and optional ratchets.
-
-<a id="rns.build_proof"></a>
 
 #### build_proof
 
@@ -85,8 +71,6 @@ Build a PROOF packet in response to a received DATA packet.
 **Returns**:
 
 Encoded PROOF packet bytes
-
-<a id="rns.build_data"></a>
 
 #### build_data
 
@@ -107,8 +91,6 @@ Build an encrypted DATA packet to send to a recipient.
 
 Encoded DATA packet bytes
 
-<a id="rns.build_lxmf_message"></a>
-
 #### build_lxmf_message
 
 ```python
@@ -116,8 +98,6 @@ def build_lxmf_message(my_identity, my_dest, my_ratchet, recipient_announce, mes
 ```
 
 Build LXMF message - destination is stripped before encryption.
-
-<a id="rns.parse_lxmf_message"></a>
 
 #### parse_lxmf_message
 
@@ -136,8 +116,6 @@ source (16) + signature (64) + msgpack
 
 Dictionary with title/content/source_hash/signature/timestamp and any other fields.
 
-<a id="rns.get_identity_from_bytes"></a>
-
 #### get_identity_from_bytes
 
 ```py
@@ -154,8 +132,6 @@ Load private keys for encrypt/sign and derive public keys.
 
 Dictionary with public/private sign/encrypt keys
 
-<a id="rns.identity_create"></a>
-
 #### identity_create
 
 ```py
@@ -168,8 +144,6 @@ Create a full fresh identity (pub/private encrypt/sign.)
 
 Dictionary with public/private sign/encrypt keys
 
-<a id="rns.ratchet_create_new"></a>
-
 #### ratchet_create_new
 
 ```py
@@ -181,8 +155,6 @@ Generate new ratchet private key.
 **Returns**:
 
 32 Bytes for a ratchet private-key
-
-<a id="rns.ratchet_get_public"></a>
 
 #### ratchet_get_public
 
