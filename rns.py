@@ -45,169 +45,102 @@ DEST_LINK = 0x03
 TRANSPORT_BROADCAST = 0
 TRANSPORT_TRANSPORT = 1
 
-# micropython has simpler/different hashing & crypto stuff, so we abstract the basic helpers
-if sys.implementation.name == "micropython":
-    from cryptolib import aes
 
-    # from pypi
-    import x25519
+# START cpython-specific
 
-    # from https://ed25519.cr.yp.to/python/ed25519.py
-    import ed25519
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+import hmac
 
-    # from https://github.com/peterhinch/micropython-msgpack
-    from umsgpack import loads as unpackb, dumps as packb
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from cryptography.hazmat.primitives import serialization
+from umsgpack import unpackb, packb
 
-    def get_identity_from_bytes(private_identity_bytes):
-        encryption_private = private_identity_bytes[:32]
-        signing_private = private_identity_bytes[32:64]
-        encryption_public = x25519.scalar_base_mult(encryption_private)
-        signing_public = ed25519.publickey(signing_private)
-        return {'public': { 'encrypt': encryption_public, 'sign': signing_public }, 'private': { 'encrypt': encryption_private, 'sign': signing_private }}
+def get_identity_from_bytes(private_identity_bytes):
+    """
+    Load private keys for encrypt/sign and derive public.
+    """
+    encryption_private = private_identity_bytes[:32]
+    signing_private = private_identity_bytes[32:64]
+    encrypt_key = X25519PrivateKey.from_private_bytes(encryption_private)
+    encryption_public = encrypt_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw
+    )
+    sign_key = Ed25519PrivateKey.from_private_bytes(signing_private)
+    signing_public = sign_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw
+    )
+    return {'public': {'encrypt': encryption_public, 'sign': signing_public }, 'private': { 'encrypt': encryption_private, 'sign': signing_private }}
 
-    def identity_create():
-        encryption_private = urandom(32)
-        signing_private = urandom(32)
-        encryption_public = x25519.scalar_base_mult(encryption_private)
-        signing_public = ed25519.publickey(signing_private)
-        return {'public': { 'encrypt': encryption_public, 'sign': signing_public }, 'private': { 'encrypt': encryption_private, 'sign': signing_private }}
+def identity_create():
+    """
+    Create a full identity (pub/private encrypt/sign.)
+    """
+    encrypt_key = X25519PrivateKey.generate()
+    encryption_private = encrypt_key.private_bytes(encoding=serialization.Encoding.Raw, format=serialization.PrivateFormat.Raw, encryption_algorithm=serialization.NoEncryption())
+    encryption_public = encrypt_key.public_key().public_bytes(encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw)
+    sign_key = Ed25519PrivateKey.generate()
+    signing_private = sign_key.private_bytes(encoding=serialization.Encoding.Raw, format=serialization.PrivateFormat.Raw, encryption_algorithm=serialization.NoEncryption())
+    signing_public = sign_key.public_key().public_bytes(encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw)
+    return { 'public': { 'encrypt': encryption_public, 'sign': signing_public }, 'private': { 'encrypt': encryption_private, 'sign': signing_private} }
 
-    def ratchet_create_new():
-        return urandom(32)
+def ratchet_create_new():
+    """
+    Generate new ratchet private key.
+    """
+    key = X25519PrivateKey.generate()
+    return key.private_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PrivateFormat.Raw,
+        encryption_algorithm=serialization.NoEncryption()
+    )
 
-    def ratchet_get_public(private_ratchet):
-        return x25519.scalar_base_mult(private_ratchet)
+def ratchet_get_public(private_ratchet):
+    """
+    Get the public key for ratchet (for use in announces.)
+    """
+    key = X25519PrivateKey.from_private_bytes(private_ratchet)
+    return key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw
+    )
 
-    def _hmac_sha256(sign_key, data):
-        # Standard HMAC construction per RFC 2104
-        block_size = 64  # SHA256 block size
+def _hmac_sha256(sign_key, data):
+    return hmac.new(sign_key, data, hashlib.sha256).digest()
 
-        # Adjust key length
-        if len(sign_key) > block_size:
-            sign_key = hashlib.sha256(sign_key).digest()
-        if len(sign_key) < block_size:
-            sign_key = sign_key + b"\x00" * (block_size - len(sign_key))
+def _aes_cbc_encrypt(encrypt_key, iv, plaintext):
+    cipher = Cipher(algorithms.AES(encrypt_key), modes.CBC(iv))
+    encryptor = cipher.encryptor()
+    return encryptor.update(plaintext) + encryptor.finalize()
 
-        # Create inner and outer padding
-        o_key_pad = bytes(b ^ 0x5C for b in sign_key)
-        i_key_pad = bytes(b ^ 0x36 for b in sign_key)
+def _aes_cbc_decrypt(encrypt_key, iv, ciphertext):
+    cipher = Cipher(algorithms.AES(encrypt_key), modes.CBC(iv))
+    decryptor = cipher.decryptor()
+    return decryptor.update(ciphertext) + decryptor.finalize()
 
-        # HMAC = H(o_key_pad || H(i_key_pad || message))
-        inner_hash = hashlib.sha256(i_key_pad + data).digest()
-        return hashlib.sha256(o_key_pad + inner_hash).digest()
+def _ed25519_validate(sign_key_pub, signature, message):
+    try:
+        pub_key_obj = Ed25519PublicKey.from_public_bytes(sign_key_pub)
+        pub_key_obj.verify(signature, message)
+        return True
+    except Exception as e:
+        return False
 
-    def _aes_cbc_encrypt(encrypt_key, iv, plaintext):
-        cipher = aes(encrypt_key, 2, iv)  # mode 2 = CBC
-        return cipher.encrypt(plaintext)
+def _x25519_exchange(private_key, public_key):
+    prv_key_obj = X25519PrivateKey.from_private_bytes(private_key)
+    pub_key_obj = X25519PublicKey.from_public_bytes(public_key)
+    shared_secret = prv_key_obj.exchange(pub_key_obj)
+    return shared_secret
 
-    def _aes_cbc_decrypt(encrypt_key, iv, ciphertext):
-        cipher = aes(encrypt_key, 2, iv)  # mode 2 = CBC
-        return cipher.decrypt(ciphertext)
+def _ed25519_sign(signed_data, sign_key_priv, sign_key_pub):
+    sign_key = Ed25519PrivateKey.from_private_bytes(sign_key_priv)
+    return sign_key.sign(signed_data)
 
-    def _ed25519_validate(sign_key_pub, signature, message):
-        try:
-            ed25519.checkvalid(signature, message, sign_key_pub)
-            return True
-        except Exception as e:
-            return False
+# END cpython-specific
 
-    def _x25519_exchange(private_key, public_key):
-        return x25519.scalar_mult(private_key, public_key)
-
-    def _ed25519_sign(signed_data, sign_key_priv, sign_key_pub):
-        return ed25519.signature(signed_data, sign_key_priv, sign_key_pub)
-
-else:
-    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-    import hmac
-
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-    from cryptography.hazmat.primitives import serialization
-    from umsgpack import unpackb, packb
-
-    def get_identity_from_bytes(private_identity_bytes):
-        """
-        Load private keys for encrypt/sign and derive public.
-        """
-        encryption_private = private_identity_bytes[:32]
-        signing_private = private_identity_bytes[32:64]
-        encrypt_key = X25519PrivateKey.from_private_bytes(encryption_private)
-        encryption_public = encrypt_key.public_key().public_bytes(
-            encoding=serialization.Encoding.Raw,
-            format=serialization.PublicFormat.Raw
-        )
-        sign_key = Ed25519PrivateKey.from_private_bytes(signing_private)
-        signing_public = sign_key.public_key().public_bytes(
-            encoding=serialization.Encoding.Raw,
-            format=serialization.PublicFormat.Raw
-        )
-        return {'public': {'encrypt': encryption_public, 'sign': signing_public }, 'private': { 'encrypt': encryption_private, 'sign': signing_private }}
-
-    def identity_create():
-        """
-        Create a full identity (pub/private encrypt/sign.)
-        """
-        encrypt_key = X25519PrivateKey.generate()
-        encryption_private = encrypt_key.private_bytes(encoding=serialization.Encoding.Raw, format=serialization.PrivateFormat.Raw, encryption_algorithm=serialization.NoEncryption())
-        encryption_public = encrypt_key.public_key().public_bytes(encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw)
-        sign_key = Ed25519PrivateKey.generate()
-        signing_private = sign_key.private_bytes(encoding=serialization.Encoding.Raw, format=serialization.PrivateFormat.Raw, encryption_algorithm=serialization.NoEncryption())
-        signing_public = sign_key.public_key().public_bytes(encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw)
-        return { 'public': { 'encrypt': encryption_public, 'sign': signing_public }, 'private': { 'encrypt': encryption_private, 'sign': signing_private} }
-
-    def ratchet_create_new():
-        """
-        Generate new ratchet private key.
-        """
-        key = X25519PrivateKey.generate()
-        return key.private_bytes(
-            encoding=serialization.Encoding.Raw,
-            format=serialization.PrivateFormat.Raw,
-            encryption_algorithm=serialization.NoEncryption()
-        )
-
-    def ratchet_get_public(private_ratchet):
-        """
-        Get the public key for ratchet (for use in announces.)
-        """
-        key = X25519PrivateKey.from_private_bytes(private_ratchet)
-        return key.public_key().public_bytes(
-            encoding=serialization.Encoding.Raw,
-            format=serialization.PublicFormat.Raw
-        )
-
-    def _hmac_sha256(sign_key, data):
-        return hmac.new(sign_key, data, hashlib.sha256).digest()
-
-    def _aes_cbc_encrypt(encrypt_key, iv, plaintext):
-        cipher = Cipher(algorithms.AES(encrypt_key), modes.CBC(iv))
-        encryptor = cipher.encryptor()
-        return encryptor.update(plaintext) + encryptor.finalize()
-
-    def _aes_cbc_decrypt(encrypt_key, iv, ciphertext):
-        cipher = Cipher(algorithms.AES(encrypt_key), modes.CBC(iv))
-        decryptor = cipher.decryptor()
-        return decryptor.update(ciphertext) + decryptor.finalize()
-
-    def _ed25519_validate(sign_key_pub, signature, message):
-        try:
-            pub_key_obj = Ed25519PublicKey.from_public_bytes(sign_key_pub)
-            pub_key_obj.verify(signature, message)
-            return True
-        except Exception as e:
-            return False
-
-    def _x25519_exchange(private_key, public_key):
-        prv_key_obj = X25519PrivateKey.from_private_bytes(private_key)
-        pub_key_obj = X25519PublicKey.from_public_bytes(public_key)
-        shared_secret = prv_key_obj.exchange(pub_key_obj)
-        return shared_secret
-
-    def _ed25519_sign(signed_data, sign_key_priv, sign_key_pub):
-        sign_key = Ed25519PrivateKey.from_private_bytes(sign_key_priv)
-        return sign_key.sign(signed_data)
 
 
 def _sha256(data):
