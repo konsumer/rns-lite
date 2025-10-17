@@ -37,7 +37,10 @@ async def handle_announce(packet):
         dest = packet['destination_hash']
         announces[packet['destination_hash']] = announce
         announces[packet['destination_hash']]['destination_hash'] = packet['destination_hash']
+         print("  Valid: Yes")
         print(f"  Saved ({len(announces)}) announce from {packet['destination_hash'].hex()}")
+    else:
+        print("  Valid: No")
 
 
 async def handle_proof(packet):
