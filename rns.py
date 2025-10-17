@@ -209,10 +209,13 @@ def decode_packet(packet_bytes):
     result = {}
     result["raw"] = packet_bytes
 
-    result["ifac_flag"] = bool(packet_bytes[0] & 0b10000000)
-    result["header_type"] = bool(packet_bytes[0] & 0b01000000)
-    result["context_flag"] = bool(packet_bytes[0] & 0b00100000)
-    result["propagation_type"] = bool(packet_bytes[0] & 0b00010000)
+    result["ifac_flag"] = packet_bytes[0] & 0b10000000
+    result["header_type"] = packet_bytes[0] & 0b01000000
+    
+    # is this named wrong?
+    result["context_flag"] = packet_bytes[0] & 0b00100000
+    
+    result["propagation_type"] = packet_bytes[0] & 0b00010000
     result["destination_type"] = packet_bytes[0] & 0b00001100
     result["packet_type"] = packet_bytes[0] & 0b00000011
     result["hops"] = packet_bytes[1]
@@ -230,11 +233,8 @@ def decode_packet(packet_bytes):
     else:
         result["source_hash"] = None
 
-    if result["context_flag"]:
-        result["context"] = packet_bytes[offset]
-        offset += 1
-    else:
-        result["context"] = None
+    result["context"] = packet_bytes[offset]
+    offset += 1
 
     result["data"] = packet_bytes[offset:]
     return result
@@ -358,11 +358,10 @@ def announce_parse(packet):
     out['name_hash'] = data[keysize:(keysize + name_hash_len)]
     out['random_hash'] = data[(keysize + name_hash_len):(keysize + name_hash_len + random_hash_len)]
     
-    # Get context_flag (try both possible key names)
-    context_flag = packet.get('context_flag', packet.get('context', 0))
+    context_flag = packet.get('context_flag', 0)
     
-    # Does this packet have a ratchet pubkey?
-    if context_flag == 1:
+    # I am not sure this does what I think
+    if context_flag:
         out['ratchet_pub'] = data[(keysize + name_hash_len + random_hash_len):(keysize + name_hash_len + random_hash_len + ratchetsize)]
         out['signature'] = data[(keysize + name_hash_len + random_hash_len + ratchetsize):(keysize + name_hash_len + random_hash_len + ratchetsize + sig_len)]
         
@@ -378,6 +377,7 @@ def announce_parse(packet):
             out['app_data'] = data[(keysize + name_hash_len + random_hash_len + sig_len):]
         else:
             out['app_data'] = b''
+
     
     # Construct signed data
     signed_data = (
@@ -411,7 +411,7 @@ def proof_validate(packet, identity, full_packet_hash):
     """
     Validate a PROOF packet (output from decode_packet.)
     """
-    return _ed25519_validate(identity['public']['sign'], packet['data'][1:65], full_packet_hash)
+    return _ed25519_validate(identity['public']['sign'], packet['data'][0:64], full_packet_hash)
 
 def message_decrypt(packet, identity, ratchets=None):
     """
@@ -424,8 +424,8 @@ def message_decrypt(packet, identity, ratchets=None):
         return None
     
     # Extract ephemeral public key and token
-    peer_pub_bytes = ciphertext_token[1:33]
-    ciphertext = ciphertext_token[33:]
+    peer_pub_bytes = ciphertext_token[:32]
+    ciphertext = ciphertext_token[32:]
     
     # Rest of function stays the same...
     if ratchets:

@@ -99,6 +99,8 @@ def test_RNS():
                     print('    Valid: No')
             else:
                 print(f"    No Message: {packet.destination_hash.hex()}")
+    print("")
+
 
 def test_rns():
     print("rns")
@@ -161,6 +163,65 @@ def test_rns():
                     print('    Valid: No')
             else:
                 print(f"    No Message: {packet['destination_hash'].hex()}")
+    print("")
 
+
+# I was seeing invalid ANNOUNCE from rnsd, in js & rns-lite, so this tests that
+packetBadAnnounce = bytes.fromhex('01007d62e355cc90ec4e79569d33a8ad6c6b00b05e9bd83282a538be44ec872286cec32de7a8335e29c72fe8e8463ca135565b3a5580d45637aeaf037fe5f608b702a3ca85efcf231c68fbfd852706ac320695e03a09b77ac21b22258e299132c47b0068f2b1de03faecd1a563d18584e2f2b4a4434bd3e9a3fb943fa035cc2205b6f779de118908b7cad82cd4830d3a70ba7c8749af77dafbb6feb4023f988cae05b7ae83210894c2ce68f2b1decb4070000000000000c0')
+
+def test_bad_announce_rns():
+    print("rns")
+    packet = rns.decode_packet(packetBadAnnounce)
+    
+    print(f"  context: {packet['context']}")
+    print(f"  context_flag: {packet['context_flag']}")
+    print(f"  data: {packet['data'].hex()}")
+    print(f"  destination_hash: {packet['destination_hash'].hex()}")
+    print(f"  destination_type: {packet['destination_type']}")
+    print(f"  header_type: {packet['header_type']}")
+    print(f"  hops: {packet['hops']}")
+    print(f"  ifac_flag: {packet['ifac_flag']}")
+    print(f"  packet_type: {packet['packet_type']}")
+    print(f"  propagation_type: {packet['propagation_type']}")
+
+    announce  = rns.announce_parse(packet)
+    print("")
+    print(f"  app_data: {announce['app_data'].hex()}")
+    print(f"  key_pub_encrypt: {announce['key_pub_encrypt'].hex()}")
+    print(f"  key_pub_signature: {announce['key_pub_signature'].hex()}")
+    print(f"  name_hash: {announce['name_hash'].hex()}")
+    print(f"  random_hash: {announce['random_hash'].hex()}")
+    print(f"  ratchet_pub: {announce['ratchet_pub'].hex()}")
+    print(f"  signature: {announce['signature'].hex()}")
+    print(f"  valid: {announce['valid']}")
+
+    print("")
+
+def test_bad_announce_RNS():
+    print("RNS")
+
+    packet = load_RNS_packet(packetBadAnnounce)
+    print(f"  data: {packet.data.hex()}")
+    print(f"  destination_hash: {packet.destination_hash.hex()}")
+    print(f"  destination_type: {packet.destination_type}")
+    print(f"  flags: {packet.flags}")
+    print(f"  header_type: {packet.header_type}")
+    print(f"  hops: {packet.hops}")
+    print(f"  packed: {packet.packed}")
+    print(f"  packet_hash: {packet.packet_hash.hex()}")
+    print(f"  packet_type: {packet.packet_type}")
+    # print(f"  raw: {packet.raw}")
+    print(f"  transport_id: {packet.transport_id}")
+    print(f"  transport_type: {packet.transport_type}")
+    print("")
+
+
+
+
+print("OFFLINE")
 test_RNS()
 test_rns()
+
+print("BAD ANNOUNCE")
+test_bad_announce_rns()
+test_bad_announce_RNS()
