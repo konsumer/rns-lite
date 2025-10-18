@@ -215,7 +215,7 @@ def decode_packet(packet_bytes):
     # is this named wrong?
     result["context_flag"] = packet_bytes[0] & 0b00100000
     
-    result["propagation_type"] = packet_bytes[0] & 0b00010000
+    result["transport_type"] = packet_bytes[0] & 0b00010000
     result["destination_type"] = packet_bytes[0] & 0b00001100
     result["packet_type"] = packet_bytes[0] & 0b00000011
     result["hops"] = packet_bytes[1]
@@ -233,7 +233,7 @@ def decode_packet(packet_bytes):
     else:
         result["source_hash"] = None
 
-    result["context"] = packet_bytes[offset]
+    result["transport_id"] = packet_bytes[offset]
     offset += 1
 
     result["data"] = packet_bytes[offset:]
@@ -251,13 +251,14 @@ def encode_packet(packet):
     if packet.get('header_type'):
         header_byte |= 0b01000000
 
+    # TODO: I think this is wrong, what I thought was context before is transport_id/transport_type
     has_context = ('context' in packet)
     if has_context:
         packet['context_flag'] = True
     if packet.get('context_flag'):
         header_byte |= 0b00100000
 
-    if packet.get('propagation_type'):
+    if packet.get('transport_type'):
         header_byte |= 0b00010000
 
     destination_type = packet.get('destination_type', 0) & 0b00001100

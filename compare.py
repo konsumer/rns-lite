@@ -214,6 +214,7 @@ def test_bad_announce_RNS():
     print(f"  transport_id: {packet.transport_id}")
     print(f"  transport_type: {packet.transport_type}")
     print("")
+    print(f"  valid: {RNS.Identity.validate_announce(packet, True)}")
 
 
 
