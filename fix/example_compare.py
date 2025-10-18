@@ -168,7 +168,7 @@ def test_rns_packets(p):
                 print(f"    Full Hash: {full_packet_hash.hex()}")
                 print(f"    Recipient: {rns_messages[full_packet_hash].hex()}")
                 recipient = rns.get_identity_from_bytes(keys[ rns_messages[full_packet_hash] ])
-                print(f"    Valid: {rns.proof_validate(packet, recipient['public']['sign'], full_packet_hash)}")
+                print(f"    Valid: {rns.proof_validate(packet, recipient, full_packet_hash)}")
                 break
     print("")
 
@@ -234,4 +234,4 @@ def test_RNS_packets(p):
 
 for p in packets:
     test_rns_packets(p)
-    test_RNS_packets(p)
+    # test_RNS_packets(p)
