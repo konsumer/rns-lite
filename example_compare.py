@@ -148,7 +148,7 @@ def test_rns_packets(p):
         rns_messages[ packet['packet_hash'] ] = packet['destination_hash']
 
         # decrypt
-        identity = rns.get_identity_from_bytes(keys[packet['destination_hash']])
+        identity = rns.identity_from_bytes(keys[packet['destination_hash']])
         decryptedBytes = rns.message_decrypt(packet, identity, ratchets)
         if decryptedBytes:
             ts, title, content, fields = umsgpack.unpackb(decryptedBytes[80:])
@@ -167,7 +167,7 @@ def test_rns_packets(p):
             if full_packet_hash.startswith(packet['destination_hash']):
                 print(f"    Full Hash: {full_packet_hash.hex()}")
                 print(f"    Recipient: {rns_messages[full_packet_hash].hex()}")
-                recipient = rns.get_identity_from_bytes(keys[ rns_messages[full_packet_hash] ])
+                recipient = rns.identity_from_bytes(keys[ rns_messages[full_packet_hash] ])
                 print(f"    Valid: {rns.proof_validate(packet, recipient, full_packet_hash)}")
                 break
     print("")

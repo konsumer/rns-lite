@@ -4,26 +4,23 @@ import asyncio
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 import rns
+import umsgpack
 
 uri = "wss://signal.konsumer.workers.dev/ws/reticulum"
 
 me = rns.identity_create()
-me_dest = rns.get_destination_hash(me, "lxmf", "delivery")
 
 # this is my ratchet
 # normally this would be re-generated periodically (and ANNOUNCEd)
-ratchet = rns.ratchet_create_new()
-ratchet_pub = rns.ratchet_get_public(ratchet)
-
-# I track annnounces, so I can send a message using their ratchet-pub (in their own ANNOUNCE)
-announces = {}
+ratchet = rns.ratchet_create()
+ratchet_pub = rns.ratchet_public(ratchet)
 
 # called periodically to ANNOUNCE myself
 async def periodic_announce(websocket, interval=30):
     while True:
         try:
-            print(f"Announcing myself: {me_dest.hex()}")
-            announceBytes = rns.build_announce(me, me_dest, 'lxmf.delivery', ratchet_pub)
+            print(f"Announcing myself: {me['destination_hash'].hex()}")
+            announceBytes = rns.build_announce(me, me['destination_hash'], 'lxmf.delivery', ratchet_pub)
             await websocket.send(announceBytes)
             await asyncio.sleep(interval)
         except ConnectionClosed:
@@ -32,15 +29,8 @@ async def periodic_announce(websocket, interval=30):
 
 async def handle_announce(packet):
     print(f"ANNOUNCE from {packet['destination_hash'].hex()}")
-    announce = rns.announce_parse(packet)
-    if announce['valid']:
-        dest = packet['destination_hash']
-        announces[packet['destination_hash']] = announce
-        announces[packet['destination_hash']]['destination_hash'] = packet['destination_hash']
-        print("  Valid: Yes")
-        print(f"  Saved ({len(announces)}) announce from {packet['destination_hash'].hex()}")
-    else:
-        print("  Valid: No")
+    announce = rns.announce_unpack(packet)
+    print(f"  Valid: {announce['valid']}")
 
 
 async def handle_proof(packet):
@@ -52,31 +42,18 @@ async def handle_data(packet, websocket):
     print(f"DATA ({message_id.hex()}) for {packet['destination_hash'].hex()}")
     
     # it was for me?
-    if packet['destination_hash'] == me_dest:
-        # tell them I got it
-        print(f"sending PROOF ({message_id.hex()})")
-        await websocket.send(rns.build_proof(me, packet, message_id))
-
+    if packet['destination_hash'] == me['destination_hash']:
         # Decrypt the message
         plaintext = rns.message_decrypt(packet, me, [ratchet])
         if plaintext:
-            message = rns.parse_lxmf_message(plaintext)
-            content_text = message['content'].decode('utf-8')
-            print(f"  From: {message['source_hash'].hex()}")
-            print(f"  Title: {message['title'].decode('utf-8')}")
-            print(f"  Content: {content_text}")
+            ts, title, content, fields = umsgpack.unpackb(plaintext[80:])
+            print(f"  Time: {ts}")
+            print(f"  Title: {title}")
+            print(f"  Content: {content}")
 
-            # Send reply to sender
-            if message['source_hash'] in announces:
-                reply = {
-                    'title': 'EchoBot',
-                    'content': content_text
-                } 
-                await websocket.send(rns.build_lxmf_message(me, me_dest, ratchet, announces[ message['source_hash'] ], reply))
-            else:
-                print(f"  Cannot reply - no announce for {message['source_hash'].hex()}")
-
-
+            # tell them I got it
+            print(f"sending PROOF ({message_id.hex()})")
+            await websocket.send(rns.build_proof(me, packet, message_id))
         else:
             print("  Could not decrypt")
 
@@ -84,7 +61,7 @@ async def handle_data(packet, websocket):
 async def handle_incoming(websocket):
     async for message in websocket:
         try:
-            packet = rns.decode_packet(message)
+            packet = rns.packet_unpack(message)
 
             if packet['packet_type'] == rns.PACKET_ANNOUNCE:
                 await handle_announce(packet)
