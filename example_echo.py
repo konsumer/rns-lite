@@ -1,101 +1,88 @@
-# this is a simple example meant for regular cpython, that uses a websocket
-
 import asyncio
-from websockets.asyncio.client import connect
-from websockets.exceptions import ConnectionClosed
-import rns
-import umsgpack
+import websockets
+from rns import *
 
-uri = "wss://signal.konsumer.workers.dev/ws/reticulum"
+WS_URL = "wss://signal.konsumer.workers.dev/ws/reticulum"
 
-me = rns.identity_create()
+# State storage
+sent_messages = {}
+announces = {}
 
-# this is my ratchet
-# normally this would be re-generated periodically (and ANNOUNCEd)
-ratchet = rns.ratchet_create()
-ratchet_pub = rns.ratchet_public(ratchet)
+me_priv = private_identity()
+me_pub = public_identity(me_priv)
+me_dest = get_destination_hash(me_pub)
+ratchet_priv = private_ratchet()
+ratchet_pub = public_ratchet(ratchet_priv)
 
-# called periodically to ANNOUNCE myself
-async def periodic_announce(websocket, interval=30):
-    while True:
-        try:
-            print(f"Announcing myself: {me['destination_hash'].hex()}")
-            announceBytes = rns.build_announce(me, me['destination_hash'], 'lxmf.delivery', ratchet_pub)
-            await websocket.send(announceBytes)
-            await asyncio.sleep(interval)
-        except ConnectionClosed:
-            break
-
-
-async def handle_announce(packet):
-    print(f"ANNOUNCE from {packet['destination_hash'].hex()}")
-    announce = rns.announce_unpack(packet)
-    print(f"  Valid: {announce['valid']}")
-
-
-async def handle_proof(packet):
-    print(f"PROOF for message {packet['destination_hash'].hex()}")
-    ## TODO: check proof?
-
-async def handle_data(packet, websocket):
-    message_id = rns.get_message_id(packet)
-    print(f"DATA ({message_id.hex()}) for {packet['destination_hash'].hex()}")
-    
-    # it was for me?
-    if packet['destination_hash'] == me['destination_hash']:
-        # Decrypt the message
-        plaintext = rns.message_decrypt(packet, me, [ratchet])
-        if plaintext:
-            ts, title, content, fields = umsgpack.unpackb(plaintext[80:])
-            print(f"  Time: {ts}")
-            print(f"  Title: {title}")
-            print(f"  Content: {content}")
-
-            # tell them I got it
-            print(f"sending PROOF ({message_id.hex()})")
-            await websocket.send(rns.build_proof(me, packet, message_id))
-        else:
-            print("  Could not decrypt")
-
-
-async def handle_incoming(websocket):
-    async for message in websocket:
-        try:
-            packet = rns.packet_unpack(message)
-
-            if packet['packet_type'] == rns.PACKET_ANNOUNCE:
-                await handle_announce(packet)
-
-            elif packet['packet_type'] == rns.PACKET_PROOF:
-                await handle_proof(packet)
-
-            elif packet['packet_type'] == rns.PACKET_DATA:
-                await handle_data(packet, websocket)
-
-        except Exception as e:
-            print(f"Error handling packet: {e}")
-            import traceback
-            traceback.print_exc()
-
-
+async def announce_myself(ws, me_priv, me_pub, ratchet_pub):
+    print(f"ANNOUNCE me {bytes_to_hex(me_dest)}")
+    pkt = build_announce(me_priv, me_pub, ratchet_pub)
+    await ws.send(pkt)
 
 async def main():
-    print(f"connecting to {uri}")
-    async for websocket in connect(uri):
-        try:
-            # start 2 threads: announce and handle messages
-            announce_task = asyncio.create_task(periodic_announce(websocket, interval=30))
-            incoming_task = asyncio.create_task(handle_incoming(websocket))
-            done, pending = await asyncio.wait(
-                [announce_task, incoming_task],
-                return_when=asyncio.FIRST_COMPLETED
-            )
-            # Cancel any remaining tasks
-            for task in pending:
-                task.cancel()
+    async with websockets.connect(WS_URL) as ws:
+        print(f"Connecting to {WS_URL}")
+        # Announce every 30 seconds
+        async def announce_loop():
+            while True:
+                await announce_myself(ws, me_priv, me_pub, ratchet_pub)
+                await asyncio.sleep(30)
+        asyncio.create_task(announce_loop())
 
-        except ConnectionClosed:
-            continue
+        async for msg in ws:
+            try:
+                packet = parse_packet(msg)
+                ptype = packet["packetType"]
+                ptypes = {PACKET_ANNOUNCE: "ANNOUNCE", PACKET_DATA: "DATA", PACKET_PROOF: "PROOF"}
+                print(ptypes.get(ptype, ptype), bytes_to_hex(packet["destinationHash"]))
+                # Handle packet types
+                if ptype == PACKET_ANNOUNCE:
+                    announce = parse_announce(packet)
+                    print("  Valid:", announce["valid"])
+                    if announce["valid"]:
+                        them_hex = bytes_to_hex(packet["destinationHash"])
+                        announces[them_hex] = {**packet, **announce}
+                elif ptype == PACKET_DATA:
+                    if equal_bytes(me_dest, packet["destinationHash"]):
+                        p = parse_lxmf(packet, me_pub, [ratchet_priv])
+                        print("  Message ID", bytes_to_hex(packet["packetHash"]))
+                        print("  Sending PROOF")
+                        proof_pkt = build_proof(msg, me_priv)
+                        await ws.send(proof_pkt)
+                        if p:
+                            source_hash, title, content = p["sourceHash"], p["title"], p["content"]
+                            them_hex = bytes_to_hex(source_hash)
+                            print("Parse", {"from": them_hex, "title": title, "content": content})
+                            # Echo back if have announce for sender
+                            if them_hex in announces:
+                                print("  Sending Response")
+                                receiver_ratchet_pub = announces[them_hex].get("ratchetPub")
+                                receiver_pub_bytes = announces[them_hex].get("publicKey")
+                                valid = validate_lxmf(p, packet, receiver_pub_bytes)
+                                print("  Valid", valid)
+                                echo_msg = build_lxmf(
+                                    source_hash,
+                                    me_priv,
+                                    receiver_pub_bytes,
+                                    receiver_ratchet_pub,
+                                    int(asyncio.get_event_loop().time() * 1000),
+                                    "EchoBot",
+                                    content,
+                                    {}
+                                )
+                                await ws.send(echo_msg)
+                            else:
+                                print("  Have not received announce for", them_hex)
+                        else:
+                            print("  Parse: No")
+                    else:
+                        print("Not for me")
+                elif ptype == PACKET_PROOF:
+                    full_packet_hash = sent_messages.get(bytes_to_hex(packet["destinationHash"]))
+                    valid = parse_proof(packet, me_pub, full_packet_hash)
+                    print("PROOF valid:", valid)
+            except Exception as e:
+                print("Error", getattr(e, "message", str(e)))
 
 if __name__ == "__main__":
     asyncio.run(main())

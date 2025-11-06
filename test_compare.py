@@ -1,8 +1,11 @@
-# this will compare offline parsing with rns and RNS
+"""
+Compare rns-lite with RNS
+Use pytest -s  test_compare.py to see all the prints
+"""
 
 import rns
 import RNS
-import umsgpack
+import msgpack
 
 # shared data from real clients: [encrypt_key, sign_key]
 kA = bytes.fromhex('072ec44973a8dee8e28d230fb4af8fe4')
@@ -107,131 +110,90 @@ def RNS_get_announce(packet):
         announce['valid'] = True
     except Exception as e:
         pass
-
-
     return announce
+
+
+pnames = ['DATA', 'ANNOUNCE', 'LINK', 'PROOF']
 
 rns_messages = {}
 
-def test_rns_packets(p):
-    packet = rns.packet_unpack(p)
+def check_compare(p, keys, ratchets):
+    packet_rns = rns.parse_packet(p)
+    packet_RNS = RNS_packet_unpack(p)
+
+    assert packet_rns['destinationHash'] == packet_RNS.destination_hash
+    assert packet_rns['destinationType'] == packet_RNS.destination_type
+    assert packet_rns['headerType'] == packet_RNS.header_type
+    assert packet_rns['hops'] == packet_RNS.hops
+    assert packet_rns['context'] == packet_RNS.context
+    assert packet_rns['packetHash'] == packet_RNS.packet_hash
+    assert packet_rns['packetType'] == packet_RNS.packet_type
+    assert packet_rns['transportId'] == packet_RNS.transport_id
+    assert packet_rns['transportType'] == packet_RNS.transport_type
+
+    print(f"{pnames[packet_RNS.packet_type]} ({packet_rns['destinationHash'].hex()})")
+
+    if packet_RNS.packet_type == rns.PACKET_ANNOUNCE:
+        announce_rns = rns.parse_announce(packet_rns)
+        announce_RNS = RNS_get_announce(packet_RNS)
+
+        assert announce_rns['valid']
+        assert announce_RNS['valid']
+        assert announce_rns['appData'] == announce_RNS['app_data']
+        assert announce_rns['nameHash'] == announce_RNS['name_hash']
+        assert announce_rns['randomHash'] == announce_RNS['random_hash']
+        assert announce_rns.get('ratchetPub', b'') == announce_RNS.get('ratchet', b'')
+        assert announce_rns['signature'] == announce_RNS['signature']
+        print('  Valid:', announce_rns['valid'])
+
+    elif packet_RNS.packet_type == rns.PACKET_DATA:
+        rns_messages[ packet_rns['packetHash'] ] = packet_rns['destinationHash']
+        identity = keys[packet_rns['destinationHash']]
+        identity_pub = rns.public_identity(identity)
+        lxmf_rns = rns.parse_lxmf(packet_rns, identity_pub, ratchets)
+        identity_obj = RNS.Identity.from_bytes(identity)
+        decrypted_bytes = None
+        for ratchet in ratchets:
+            try:
+                decrypted_bytes = identity_obj.decrypt(packet_RNS.data, ratchets=[ratchet])
+                if decrypted_bytes: break
+            except Exception:
+                continue
+        assert decrypted_bytes is not None
+
+        ts, title, content, fields = msgpack.loads(decrypted_bytes[80:], raw=False)
+        if isinstance(title, bytes): title = title.decode()
+        if isinstance(content, bytes): content = content.decode()
+
+        # Now compare LXMF output
+        assert lxmf_rns is not None
+        assert lxmf_rns['timestamp'] == ts
+        assert lxmf_rns['title'] == title
+        assert lxmf_rns['content'] == content
+        assert lxmf_rns['fields'] == fields
+        print(f"  fields: {fields}, content: {content}")
+
+    elif packet_RNS.packet_type == rns.PACKET_PROOF:
+        found = False
+        for full_packet_hash in rns_messages:
+          if packet_rns['destinationHash'] == full_packet_hash[:len(packet_rns['destinationHash'])]:
+              recipient = keys[ rns_messages[full_packet_hash] ]
+              recipient_pub = rns.public_identity(recipient)
+              valid_rns = rns.parse_proof(packet_rns, recipient_pub, full_packet_hash)
+              recipient_obj = RNS.Identity.from_bytes(recipient)
+              valid_RNS = recipient_obj.validate(packet_RNS.data, full_packet_hash)
+              assert valid_rns
+              assert valid_RNS
+              print('  Found:', True)
+              print('  Valid:', valid_rns)
+              found = True
+              break
+        if not found:
+          print('  Found:', False)
+
+def test_run():
+  print("")
+  for p in packets:
+    check_compare(p, keys, ratchets)
+
     
-
-    print("rns")
-    print(f"  context: {packet['context']}")
-    print(f"  context_flag: {packet['context_flag']}")
-    # print(f"  data: {packet['data'].hex()}")
-    print(f"  destination_hash: {packet['destination_hash'].hex()}")
-    print(f"  destination_type: {packet['destination_type']}")
-    print(f"  flags: {packet['flags']}")
-    print(f"  header_type: {packet['header_type']}")
-    print(f"  hops: {packet['hops']}")
-    print(f"  packet_hash: {packet['packet_hash'].hex()}")
-    print(f"  packet_type: {packet['packet_type']}")
-    print(f"  transport_id: {packet['transport_id']}")
-    print(f"  transport_type: {packet['transport_type']}")
-
-    if packet['packet_type'] == rns.PACKET_ANNOUNCE:
-        print(f"\n  ANNOUNCE")
-        announce = rns.announce_unpack(packet)
-        print(f"    app_data: {announce['app_data'].hex()}")
-        print(f"    name_hash: {announce['name_hash'].hex()}")
-        print(f"    random_hash: {announce['random_hash'].hex()}")
-        print(f"    ratchet: {announce['ratchet'].hex()}")
-        print(f"    signature: {announce['signature'].hex()}")
-        # print(f"    signed_data: {announce['signed_data'].hex()}")
-        print(f"    valid: {announce['valid']}")
-
-    if packet['packet_type'] == rns.PACKET_DATA:
-        print(f"\n  DATA")
-        # store the receiver of the message for PROOF
-        rns_messages[ packet['packet_hash'] ] = packet['destination_hash']
-
-        # decrypt
-        identity = rns.identity_from_bytes(keys[packet['destination_hash']])
-        decryptedBytes = rns.message_decrypt(packet, identity, ratchets)
-        if decryptedBytes:
-            ts, title, content, fields = umsgpack.unpackb(decryptedBytes[80:])
-            print(f"    Time: {ts}")
-            print(f"    Title: {title}")
-            print(f"    Content: {content}")
-        else:
-            print("    Decryption: Failed")
-
-    if packet['packet_type'] == rns.PACKET_PROOF:
-        print(f"\n  PROOF")
-        # figure out the right identity of receiver for this packet
-        # normally each client would already have  it's own pubkey
-        # so you could use destination-id to look up full-message-id
-        for full_packet_hash in rns_messages:
-            if full_packet_hash.startswith(packet['destination_hash']):
-                print(f"    Full Hash: {full_packet_hash.hex()}")
-                print(f"    Recipient: {rns_messages[full_packet_hash].hex()}")
-                recipient = rns.identity_from_bytes(keys[ rns_messages[full_packet_hash] ])
-                print(f"    Valid: {rns.proof_validate(packet, recipient, full_packet_hash)}")
-                break
-    print("")
-
-
-def test_RNS_packets(p):
-    packet = RNS_packet_unpack(p)
-    print("RNS")
-    print(f"  context: {packet.context}")
-    print(f"  context_flag: {packet.context_flag}")
-    # print(f"  data: {packet.data.hex()}")
-    print(f"  destination_hash: {packet.destination_hash.hex()}")
-    print(f"  destination_type: {packet.destination_type}")
-    print(f"  flags: {packet.flags}")
-    print(f"  header_type: {packet.header_type}")
-    print(f"  hops: {packet.hops}")
-    print(f"  packet_hash: {packet.packet_hash.hex()}")
-    print(f"  packet_type: {packet.packet_type}")
-    print(f"  transport_id: {packet.transport_id}")
-    print(f"  transport_type: {packet.transport_type}")
-
-    if packet.packet_type == rns.PACKET_ANNOUNCE:
-        print(f"\n  ANNOUNCE")
-        announce = RNS_get_announce(packet)
-        print(f"    app_data: {announce['app_data'].hex()}")
-        print(f"    name_hash: {announce['name_hash'].hex()}")
-        print(f"    random_hash: {announce['random_hash'].hex()}")
-        print(f"    ratchet: {announce['ratchet'].hex()}")
-        print(f"    signature: {announce['signature'].hex()}")
-        # print(f"    signed_data: {announce['signed_data'].hex()}")
-        print(f"    valid: {announce['valid']}")
-
-    if packet.packet_type == rns.PACKET_DATA:
-        print(f"\n  DATA")
-        # store the receiver of the message for PROOF
-        rns_messages[ packet.packet_hash ] = packet.destination_hash
-
-        # decrypt
-        identity = RNS.Identity.from_bytes(keys[packet.destination_hash])
-        decryptedBytes = identity.decrypt(packet.data, ratchets=ratchets)
-        if decryptedBytes:
-            ts, title, content, fields = umsgpack.unpackb(decryptedBytes[80:])
-            print(f"    Time: {ts}")
-            print(f"    Title: {title}")
-            print(f"    Content: {content}")
-        else:
-            print("    Decryption: Failed")
-
-    if packet.packet_type == rns.PACKET_PROOF:
-        print(f"\n  PROOF")
-        # figure out the right identity of receiver for this packet
-        # normally each client would already have  it's own pubkey
-        # so you could use destination-id to look up full-message-id (to see if it's one you sent)
-        for full_packet_hash in rns_messages:
-            if full_packet_hash.startswith(packet.destination_hash):
-                print(f"    Full Hash: {full_packet_hash.hex()}")
-                print(f"    Recipient: {rns_messages[full_packet_hash].hex()}")
-                recipient = RNS.Identity.from_bytes(keys[rns_messages[full_packet_hash]])
-                print(f"    Valid: {recipient.validate(packet.data, full_packet_hash)}")
-                break
-    print("")
-
-
-
-for p in packets:
-    test_rns_packets(p)
-    # test_RNS_packets(p)

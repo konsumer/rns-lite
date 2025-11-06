@@ -1,35 +1,40 @@
-import sys
-from os import urandom
-import hashlib
-import time
-import cryptohelpers as crypto
+"""
+Lightweight Reticulum library for Python
+"""
 
-PACKET_DATA         = 0x00     # Data packets
-PACKET_ANNOUNCE     = 0x01     # Announces
-PACKET_LINKREQUEST  = 0x02     # Link requests
-PACKET_PROOF        = 0x03     # Proofs
+from utils import *
 
-CONTEXT_NONE           = 0x00   # Generic data packet
-CONTEXT_RESOURCE       = 0x01   # Packet is part of a resource
-CONTEXT_RESOURCE_ADV   = 0x02   # Packet is a resource advertisement
-CONTEXT_RESOURCE_REQ   = 0x03   # Packet is a resource part request
-CONTEXT_RESOURCE_HMU   = 0x04   # Packet is a resource hashmap update
-CONTEXT_RESOURCE_PRF   = 0x05   # Packet is a resource proof
-CONTEXT_RESOURCE_ICL   = 0x06   # Packet is a resource initiator cancel message
-CONTEXT_RESOURCE_RCL   = 0x07   # Packet is a resource receiver cancel message
-CONTEXT_CACHE_REQUEST  = 0x08   # Packet is a cache request
-CONTEXT_REQUEST        = 0x09   # Packet is a request
-CONTEXT_RESPONSE       = 0x0A   # Packet is a response to a request
-CONTEXT_PATH_RESPONSE  = 0x0B   # Packet is a response to a path request
-CONTEXT_COMMAND        = 0x0C   # Packet is a command
-CONTEXT_COMMAND_STATUS = 0x0D   # Packet is a status of an executed command
-CONTEXT_CHANNEL        = 0x0E   # Packet contains link channel data
-CONTEXT_KEEPALIVE      = 0xFA   # Packet is a keepalive packet
-CONTEXT_LINKIDENTIFY   = 0xFB   # Packet is a link peer identification proof
-CONTEXT_LINKCLOSE      = 0xFC   # Packet is a link close message
-CONTEXT_LINKPROOF      = 0xFD   # Packet is a link packet proof
-CONTEXT_LRRTT          = 0xFE   # Packet is a link request round-trip time measurement
-CONTEXT_LRPROOF        = 0xFF   # Packet is a link request proof
+import struct
+import msgpack
+
+# Packet types
+PACKET_DATA = 0x00
+PACKET_ANNOUNCE = 0x01
+PACKET_LINKREQUEST = 0x02
+PACKET_PROOF = 0x03
+
+# Context types
+CONTEXT_NONE = 0x00
+CONTEXT_RESOURCE = 0x01
+CONTEXT_RESOURCEADV = 0x02
+CONTEXT_RESOURCEREQ = 0x03
+CONTEXT_RESOURCEHMU = 0x04
+CONTEXT_RESOURCEPRF = 0x05
+CONTEXT_RESOURCEICL = 0x06
+CONTEXT_RESOURCERCL = 0x07
+CONTEXT_CACHEREQUEST = 0x08
+CONTEXT_REQUEST = 0x09
+CONTEXT_RESPONSE = 0x0a
+CONTEXT_PATHRESPONSE = 0x0b
+CONTEXT_COMMAND = 0x0c
+CONTEXT_COMMANDSTATUS = 0x0d
+CONTEXT_CHANNEL = 0x0e
+CONTEXT_KEEPALIVE = 0xfa
+CONTEXT_LINKIDENTIFY = 0xfb
+CONTEXT_LINKCLOSE = 0xfc
+CONTEXT_LINKPROOF = 0xfd
+CONTEXT_LRRTT = 0xfe
+CONTEXT_LRPROOF = 0xff
 
 # Destination types
 DEST_SINGLE = 0x00
@@ -41,308 +46,359 @@ DEST_LINK = 0x03
 TRANSPORT_BROADCAST = 0
 TRANSPORT_TRANSPORT = 1
 
-def get_destination_hash(identity, full_name='lxmf.delivery'):
-    """
-    Get the destination-hash (LXMF address) from identity.
-    """
-    identity_hash = crypto.sha256(identity['public']['bytes'])[:16]
-    name_hash = crypto.sha256(full_name.encode("utf-8"))[:10]
-    addr_hash_material = name_hash + identity_hash
-    destination_hash = crypto.sha256(addr_hash_material)[:16]
-    return destination_hash
+def build_packet(packet):
+    hops = packet.get('hops', 0)
+    destination_type = packet.get('destinationType', DEST_SINGLE)
+    transport_type = packet.get('transportType', TRANSPORT_BROADCAST)
+    packet_type = packet.get('packetType')
+    context = packet.get('context')
+    transport_id = packet.get('transportId')
+    destination_hash = packet.get('destinationHash')
+    data = packet.get('data')
 
-def get_message_id(packet):
-    """
-    Get the message-id (used as destination in PROOFs, for example) from a packet (output from packet_unpack.)
-    """
-    header_type = (packet['raw'][0] >> 6) & 0b11
-    hashable_part = bytes([packet['raw'][0] & 0b00001111])
-    hashable_part += packet['raw'][2:]
-    return crypto.sha256(hashable_part)
+    # Determine flags and header structure
+    context_flag = 1 if context is not None else 0
+    header_type = 1 if transport_id is not None else 0
 
+    flags = (
+        (header_type << 6)
+        | (context_flag << 5)
+        | (transport_type << 4)
+        | ((destination_type & 0x03) << 2)
+        | (packet_type & 0x03)
+    )
 
-def identity_from_bytes(privatebytes, full_name='lxmf.delivery'):
-    """
-    Load a complete identity (private/public for encrypt/sign and destination_hash) from private bytes
-    """
-    identity = {
-        'private': {
-            'encrypt': crypto.x25519_private_from_bytes(privatebytes[:32]),
-            'sign': crypto.ed25519_private_from_bytes(privatebytes[32:64])
-        },
-        'public': {}
-    }
-    identity['public']['encrypt'] = crypto.x25519_public_from_private(identity['private']['encrypt'])
-    identity['public']['sign'] = crypto.ed25519_public_from_private(identity['private']['sign'])
-    identity['private']['bytes'] = crypto.x25519_private_to_bytes(identity['private']['encrypt']) + crypto.ed25519_private_to_bytes(identity['private']['sign'])
-    identity['public']['bytes'] = crypto.x25519_public_to_bytes(identity['public']['encrypt']) + crypto.ed25519_public_to_bytes(identity['public']['sign'])
-    identity['destination_hash'] = get_destination_hash(identity, full_name)
-    return identity
+    parts = bytearray()
+    parts.append(flags)
+    parts.append(hops)
 
-
-def identity_create(full_name='lxmf.delivery'):
-    """
-    Build a complete identity (private/public for encrypt/sign and destination_hash)
-    """
-    return identity_from_bytes(urandom(64), full_name)
-
-def ratchet_create():
-    return urandom(32)
-
-def ratchet_public(private):
-    return crypto.x25519_public_to_bytes(crypto.x25519_public_from_private(crypto.x25519_private_from_bytes(private)))
-
-def packet_unpack(packet_bytes):
-    """
-    Phase 1 parsing: basic reticulum packet, that just pulls out header-flags & data
-    """
-    result = {}
-    result["raw"] = packet_bytes
-    try:
-        result['flags'] = result["raw"][0]
-        result['hops']  = result["raw"][1]
-
-        result['header_type']      = (result['flags'] & 0b01000000) >> 6
-        result['context_flag']     = (result['flags'] & 0b00100000) >> 5
-        result['transport_type']   = (result['flags'] & 0b00010000) >> 4
-        result['destination_type'] = (result['flags'] & 0b00001100) >> 2
-        result['packet_type']      = (result['flags'] & 0b00000011)
-
-        DST_LEN = 16  # RNS.Reticulum.TRUNCATED_HASHLENGTH//8
-
-        if result['header_type'] == 1:
-            result['transport_id'] = result['raw'][2:DST_LEN+2]
-            result['destination_hash'] = result['raw'][DST_LEN+2:2*DST_LEN+2]
-            result['context'] = ord(result['raw'][2*DST_LEN+2:2*DST_LEN+3])
-            result['data'] = result['raw'][2*DST_LEN+3:]
-        else:
-            result['transport_id'] = None
-            result['destination_hash'] = result['raw'][2:DST_LEN+2]
-            result['context'] = ord(result['raw'][DST_LEN+2:DST_LEN+3])
-            result['data'] = result['raw'][DST_LEN+3:]
-
-        result['packet_hash'] = get_message_id(result)
-
-        return result
-
-    except Exception as e:
-        # print(e)
-        # malformed packet
-        return None
-
-def announce_unpack(packet):
-    """
-    Phase 2 parsing: verify & pull out the announce-related parts from packet (output from packet_unpack.)
-    """
-    keysize = 64
-    ratchetsize = 32
-    name_hash_len = 10
-    sig_len = 64
-    destination_hash = packet['destination_hash']
-    public_key = packet['data'][:keysize]
-    
-    if packet['context_flag'] == 1:
-        name_hash   = packet['data'][keysize:keysize+name_hash_len ]
-        random_hash = packet['data'][keysize+name_hash_len:keysize+name_hash_len+10]
-        ratchet     = packet['data'][keysize+name_hash_len+10:keysize+name_hash_len+10+ratchetsize]
-        signature   = packet['data'][keysize+name_hash_len+10+ratchetsize:keysize+name_hash_len+10+ratchetsize+sig_len]
-        app_data    = b""
-        if len(packet['data']) > keysize+name_hash_len+10+sig_len+ratchetsize:
-            app_data = packet['data'][keysize+name_hash_len+10+sig_len+ratchetsize:]
+    if header_type:
+        # [transport_id][destination_hash][context][data]
+        parts += transport_id
+        parts += destination_hash
+        parts.append(context if context is not None else 0)
+        if data:
+            parts += data
     else:
-        ratchet     = b""
-        name_hash   = packet['data'][keysize:keysize+name_hash_len]
-        random_hash = packet['data'][keysize+name_hash_len:keysize+name_hash_len+10]
-        signature   = packet['data'][keysize+name_hash_len+10:keysize+name_hash_len+10+sig_len]
-        app_data    = b""
-        if len(packet['data']) > keysize+name_hash_len+10+sig_len:
-            app_data = packet['data'][keysize+name_hash_len+10+sig_len:]
+        # [destination_hash][context][data]
+        parts += destination_hash
+        parts.append(context if context is not None else 0)
+        if data:
+            parts += data
 
-    signed_data = destination_hash+public_key+name_hash+random_hash+ratchet+app_data
+    return bytes(parts)
 
-    if not len(packet['data']) > 64 + 10 + 10 + 64:
-        app_data = None
+def build_announce(identity_priv_bytes, identity_pub_bytes, ratchet_pub_bytes=None, appdata=None, name="lxmf.delivery"):
+    destination_hash = get_destination_hash(identity_pub_bytes, name)
 
-    announce = {
-        'app_data': app_data,
-        'name_hash': name_hash,
-        'public_key': public_key,
-        'random_hash': random_hash,
-        'ratchet': ratchet,
-        'signature': signature,
-        'signed_data': signed_data,
-        'valid': crypto.ed25519_validate(crypto.ed25519_public_from_bytes(public_key[32:64]), signature, signed_data)
+    random_hash = random_bytes(10)
+    name_hash = sha256(name.encode('utf-8'))[:10]
+
+    # Default ratchet is encryption key; explicit ratchet if supplied and differs
+    enc_pub = identity_pub_bytes[:32]
+    ratchet_pub_bytes = ratchet_pub_bytes or enc_pub
+    has_explicit_ratchet = ratchet_pub_bytes != enc_pub
+
+    # Get app data (empty if not supplied)
+    if appdata is None:
+        app_data_bytes = b""
+    elif isinstance(appdata, str):
+        app_data_bytes = appdata.encode()
+    else:
+        app_data_bytes = appdata
+
+    # Prepare signed data
+    signed_data = concat_bytes(
+        destination_hash,
+        identity_pub_bytes,
+        name_hash,
+        random_hash,
+        ratchet_pub_bytes if has_explicit_ratchet else b"",
+        app_data_bytes,
+    )
+
+    signature = ed25519_sign(signed_data, identity_priv_bytes[32:])
+
+    # Order fields
+    data_parts = [
+        identity_pub_bytes,
+        name_hash,
+        random_hash,
+    ]
+    if has_explicit_ratchet:
+        data_parts.append(ratchet_pub_bytes)
+    data_parts.append(signature)
+    if app_data_bytes:
+        data_parts.append(app_data_bytes)
+    data = concat_bytes(*data_parts)
+
+    packet = {
+        'hops': 0,
+        'destinationType': DEST_SINGLE,
+        'transportType': TRANSPORT_BROADCAST,
+        'packetType': PACKET_ANNOUNCE,
+        'context': CONTEXT_NONE if has_explicit_ratchet else None,
+        'destinationHash': destination_hash,
+        'data': data,
     }
 
+    return build_packet(packet)
+
+def build_data(destination_hash, data, context=CONTEXT_NONE, transport_id=None):
+    packet = {
+        'hops': 0,
+        'destinationType': DEST_SINGLE,
+        'transportType': TRANSPORT_TRANSPORT if transport_id else TRANSPORT_BROADCAST,
+        'packetType': PACKET_DATA,
+        'context': context,
+        'transportId': transport_id,
+        'destinationHash': destination_hash,
+        'data': data,
+    }
+    return build_packet(packet)
+
+def build_lxmf(source_hash, sender_priv_bytes, receiver_pub_bytes, receiver_ratchet_pub, timestamp, title, content, fields):
+    # Pack as native str to align with official encoders
+    lxmf_content = msgpack.packb([timestamp, title, content, fields], use_bin_type=True)
+
+    destination_hash = get_destination_hash(receiver_pub_bytes, "lxmf.delivery")
+
+    message_id = sha256(concat_bytes(destination_hash, source_hash, lxmf_content))
+    message_to_sign = concat_bytes(destination_hash, source_hash, lxmf_content, message_id)
+
+    signature = ed25519_sign(message_to_sign, sender_priv_bytes[32:])
+    plaintext = concat_bytes(source_hash, signature, lxmf_content)
+
+    encrypted = message_encrypt(plaintext, receiver_pub_bytes, receiver_ratchet_pub)
+    return build_data(destination_hash, encrypted, context=CONTEXT_NONE)
+
+def build_proof(data_packet, identity_priv_bytes):
+    # For simplicity, data_packet is a bytes-like packet
+    parsed = parse_packet(data_packet)
+    packet_hash = parsed['packetHash']
+    destination_hash = parsed['destinationHash']
+
+    signing_priv_key = identity_priv_bytes[32:]
+    signature = ed25519_sign(packet_hash, signing_priv_key)
+
+    packet = {
+        'hops': 0,
+        'destinationType': DEST_SINGLE,
+        'transportType': TRANSPORT_BROADCAST,
+        'packetType': PACKET_PROOF,
+        'destinationHash': destination_hash,
+        'data': signature,
+    }
+    return build_packet(packet)
+
+def message_encrypt(plaintext, identity_pub, ratchet):
+    identity_hash = sha256(identity_pub)[:16]
+    ephemeral_priv = random_bytes(32)
+    ephemeral_pub = x25519_public_for_private(ephemeral_priv)
+
+    shared_key = x25519_exchange(ephemeral_priv, ratchet)
+    derived_key = hkdf(64, shared_key, identity_hash)
+    signing_key = derived_key[:32]
+    encryption_key = derived_key[32:]
+
+    iv = random_bytes(16)
+    ciphertext_data = aes_cbc_encrypt(encryption_key, iv, plaintext)
+    signed_data = concat_bytes(iv, ciphertext_data)
+    hmac_val = hmac_sha256(signing_key, signed_data)
+
+    return concat_bytes(ephemeral_pub, iv, ciphertext_data, hmac_val)
+
+def get_destination_hash(identity_pub_bytes, full_name="lxmf.delivery"):
+    # Use full 64-byte identity pubkey for hash, then truncate
+    identity_hash = sha256(identity_pub_bytes)[:16]
+    name_hash = sha256(full_name.encode())[:10]
+
+    addr_hash_material = bytearray(26)
+    addr_hash_material[:10] = name_hash
+    addr_hash_material[10:] = identity_hash
+
+    return sha256(bytes(addr_hash_material))[:16]
+
+def get_message_id(packet_bytes):
+    header_type = (packet_bytes[0] >> 6) & 0b11
+    if header_type == 1:
+        # header present: skip first 18 bytes, mask first byte
+        hashable_part = bytes([packet_bytes[0] & 0b00001111]) + packet_bytes[18:]
+    else:
+        # short header: skip first 2 bytes, mask first byte
+        hashable_part = bytes([packet_bytes[0] & 0b00001111]) + packet_bytes[2:]
+    return sha256(hashable_part)
+
+def parse_packet(packet_bytes):
+    flags = packet_bytes[0]
+    hops = packet_bytes[1]
+
+    header_type = (flags >> 6) & 0x01
+    context_flag = (flags >> 5) & 0x01
+    transport_type = (flags >> 4) & 0x01
+    destination_type = (flags >> 2) & 0x03
+    packet_type = flags & 0x03
+
+    DSTLEN = 16
+
+    if header_type:
+        transport_id = packet_bytes[2:2+DSTLEN]
+        destination_hash = packet_bytes[2+DSTLEN:2+2*DSTLEN]
+        context = packet_bytes[2+2*DSTLEN]
+        data = packet_bytes[2+2*DSTLEN+1:]
+    else:
+        transport_id = None
+        destination_hash = packet_bytes[2:2+DSTLEN]
+        context = packet_bytes[2+DSTLEN]
+        data = packet_bytes[2+DSTLEN+1:]
+
+    packet_hash = get_message_id(packet_bytes)
+
+    return {
+        'flags': flags,
+        'hops': hops,
+        'headerType': header_type,
+        'contextFlag': context_flag,
+        'transportType': transport_type,
+        'destinationType': destination_type,
+        'packetType': packet_type,
+        'transportId': transport_id,
+        'destinationHash': destination_hash,
+        'context': context,
+        'data': data,
+        'packetHash': packet_hash,
+    }
+
+def parse_announce(packet):
+    # packet: dict, as returned by parse_packet
+    data = packet['data']
+    announce = {}
+    announce['valid'] = False
+
+    public_key = data[:64]
+    announce['publicKey'] = public_key
+    announce['keyPubEncrypt'] = data[:32]
+    announce['keyPubSignature'] = data[32:64]
+    announce['nameHash'] = data[64:74]
+    announce['randomHash'] = data[74:84]
+
+    offset = 84
+    if packet['contextFlag']:
+        announce['ratchetPub'] = data[offset:offset+32]
+        ratchet_for_signing = announce['ratchetPub']
+        offset += 32
+    else:
+        ratchet_for_signing = b""
+
+    announce['signature'] = data[offset:offset+64]
+    offset += 64
+
+    if len(data) > offset:
+        announce['appData'] = data[offset:]
+    else:
+        announce['appData'] = b""
+
+    # build data that was signed
+    signed_data = concat_bytes(
+        packet['destinationHash'],
+        public_key,
+        announce['nameHash'],
+        announce['randomHash'],
+        ratchet_for_signing,
+        announce['appData'],
+    )
+
+    announce['valid'] = ed25519_validate(
+        announce['keyPubSignature'],
+        announce['signature'],
+        signed_data,
+    )
+
+    announce['destinationHash'] = packet['destinationHash']
     return announce
 
-def message_decrypt(packet, identity, ratchets=[]):
-    """
-    Decrypt a DATA message packet using identity's private key and optional ratchets.
-    """
-    identity_hash = crypto.sha256(identity['public']['bytes'])[:16]
-    ciphertext_token = packet.get('data', b'')
-    if not ciphertext_token or len(ciphertext_token) <= 49:
-        return None
-    
-    # Extract ephemeral public key and token
-    peer_pub_bytes = ciphertext_token[:32]
-    ciphertext = ciphertext_token[32:]
+def message_decrypt(packet, identity_pub, ratchets):
+    identity_hash = sha256(identity_pub)[:16]
+    ciphertext_token = packet['data']
 
-    # loop over user's ratchets to see if any can decrypt
-    if ratchets:
-        for ratchet in ratchets:
-            if len(ratchet) != 32:
+    if len(ciphertext_token) < 49:
+        return None
+
+    peer_pub_bytes = ciphertext_token[:32]
+    # The "rest" is IV (16) + ciphertext + HMAC (last 32)
+    rest = ciphertext_token[32:]
+    if len(rest) < 48:  # 16 for IV, 32 for HMAC
+        return None
+
+    signed_data = rest[:-32]  # IV + ciphertext
+    received_hmac = rest[-32:]
+
+    # Now go through ratchets
+    for ratchet in ratchets:
+        if len(ratchet) != 32:
+            continue
+
+        try:
+            shared_key = x25519_exchange(ratchet, peer_pub_bytes)
+            derived_key = hkdf(64, shared_key, identity_hash)
+            signing_key = derived_key[:32]
+            encryption_key = derived_key[32:]
+
+            expected_hmac = hmac_sha256(signing_key, signed_data)
+            if not equal_bytes(expected_hmac, received_hmac):
                 continue
-            try:
-                shared_key = crypto.x25519_exchange(crypto.x25519_private_from_bytes(ratchet), crypto.x25519_public_from_bytes(peer_pub_bytes))
-                derived_key = crypto.hkdf(
-                    length=64,
-                    derive_from=shared_key,
-                    salt=identity_hash,
-                    context=None
-                )
-                
-                signing_key = derived_key[:32] 
-                encryption_key = derived_key[32:]
-                
-                if len(ciphertext) <= 48:
-                    continue
-                    
-                received_hmac = ciphertext[-32:]
-                signed_data = ciphertext[:-32]
-                expected_hmac = crypto.hmac_sha256(signing_key, signed_data)
-                
-                if received_hmac != expected_hmac:
-                    continue
-                    
-                iv = ciphertext[:16]
-                ciphertext_data = ciphertext[16:-32]
-                plaintext = crypto.decrypt(encryption_key, iv, ciphertext_data)
-                return plaintext
-                
-            except Exception as e:
-                # print(e)
-                continue
+
+            iv = signed_data[:16]
+            ciphertext_data = signed_data[16:]
+            decrypted = aes_cbc_decrypt(encryption_key, iv, ciphertext_data)
+            return decrypted
+        except Exception as e:
+            print('ERROR', e)
+            continue
+
     return None
 
-def proof_validate(packet, idenityPub, full_packet_hash):
-    """
-    Validate a PROOF packet (output from packet_unpack.)
-    """
-    return crypto.ed25519_validate(idenityPub['public']['sign'], packet['data'][0:64], full_packet_hash)
+def parse_lxmf(packet, identity_pub, ratchets, sender_pub_key=None):
+    plaintext = message_decrypt(packet, identity_pub, ratchets)
+    if plaintext is None:
+        return None
 
+    try:
+        source_hash = plaintext[:16]
+        signature = plaintext[16:80]
+        raw = plaintext[80:]
 
-def build_proof(identity, packet, message_id=None):
-    """
-    Build a PROOF packet in response to a received DATA packet.
-    """
-    if message_id is None:
-        message_id = get_message_id(packet)
-    proof_destination = message_id[:16]
-    signature = crypto.ed25519_sign(identity['private']['sign'], message_id)
-    proof_data = bytes([0x00]) + signature
-    pkt = {
-        'destination_hash': proof_destination,
-        'packet_type': PACKET_PROOF,
-        'destination_type': 0,
-        'hops': 0,
-        'data': proof_data
-    }
-    return encode_packet(pkt)
+        fields = msgpack.unpackb(raw, raw=False)
+        timestamp, title, content, field_dict = fields
 
-def encode_packet(packet):
-    header_byte = 0
+        lxmf_obj = {
+            'sourceHash': source_hash,
+            'signature': signature,
+            'timestamp': timestamp,
+            'title': title.decode() if isinstance(title, bytes) else title,
+            'content': content.decode() if isinstance(content, bytes) else content,
+            'fields': field_dict,
+            'raw': raw,
+            'valid': False,
+        }
 
-    source_hash = packet.get('source_hash')
-    if source_hash:
-        packet['header_type'] = 1
+        if sender_pub_key:
+            lxmf_obj['valid'] = validate_lxmf(lxmf_obj, packet, sender_pub_key)
 
-    if packet.get('ifac_flag'):
-        header_byte |= 0b10000000
-    if packet.get('header_type'):
-        header_byte |= 0b01000000
+        return lxmf_obj
+    except Exception as e:
+        print("Exception in parse_lxmf:", e)
+        return None
 
-    # TODO: I think this is wrong, what I thought was context before is transport_id/transport_type
-    has_context = ('context' in packet)
-    if has_context:
-        packet['context_flag'] = True
-    if packet.get('context_flag'):
-        header_byte |= 0b00100000
+def validate_lxmf(lxmf, packet, sender_pub_key):
+    message_id = sha256(concat_bytes(packet['destinationHash'], lxmf['sourceHash'], lxmf['raw']))
+    message_to_verify = concat_bytes(packet['destinationHash'], lxmf['sourceHash'], lxmf['raw'], message_id)
+    return ed25519_validate(
+        sender_pub_key[32:],
+        lxmf['signature'],
+        message_to_verify,
+    )
 
-    if packet.get('transport_type'):
-        header_byte |= 0b00010000
-
-    destination_type = packet.get('destination_type', 0) & 0b00001100
-    header_byte |= destination_type
-
-    packet_type = packet.get('packet_type', 0) & 0b00000011
-    header_byte |= packet_type
-
-    out = bytearray()
-    out.append(header_byte)
-    out.append(packet.get('hops', 0) & 0xFF)
-
-    dest = packet.get('destination_hash', b'')
-    if len(dest) != 16:
-        raise ValueError("destination_hash must be 16 bytes")
-    out += dest
-
-    if source_hash:
-        if len(source_hash) != 16:
-            raise ValueError("source_hash must be 16 bytes")
-        out += source_hash
-
-    if packet.get('context_flag'):
-        out.append(packet.get('context', 0) & 0xFF)
-
-    out += packet.get('data', b'')
-    return bytes(out)
-
-def build_announce(identity, destination, name='lxmf.delivery', ratchet_pub=None, app_data=None):
-    pub_enc = identity['public']['encrypt']
-    pub_sig = identity['public']['sign']
-    keys = identity['public']['bytes']
-
-    name_hash = crypto.sha256(name.encode('utf-8'))[:10]
-    random_hash = urandom(10)
-
-    if app_data is None:
-        app_data = b''
-    elif isinstance(app_data, str):
-        app_data = app_data.encode('utf-8')
-
-    # Determine the ratchet key to use
-    if ratchet_pub is None or ratchet_pub == pub_enc:
-        effective_ratchet = pub_enc
-        context_val = 0
-    else:
-        if len(ratchet_pub) != 32:
-            raise ValueError("ratchet_pub must be 32 bytes")
-        effective_ratchet = ratchet_pub
-        context_val = 1
-
-    # Signature includes: destination + keys + name_hash + random_hash + ratchet + app_data
-    signed_data = destination + keys + name_hash + random_hash + effective_ratchet + app_data
-    signature = crypto.ed25519_sign(identity['private']['sign'], signed_data)
-
-    # Payload structure depends on context
-    if context_val == 1:
-        # Explicit ratchet: keys + name_hash + random_hash + ratchet + signature + app_data
-        payload = keys + name_hash + random_hash + effective_ratchet + signature + app_data
-    else:
-        # Implicit ratchet: keys + name_hash + random_hash + signature + app_data
-        payload = keys + name_hash + random_hash + signature + app_data
-
-    pkt = {
-        'destination_hash': destination,
-        'packet_type': PACKET_ANNOUNCE,
-        'destination_type': 0,
-        'hops': 0,
-        'data': payload,
-        'context': context_val,
-        'context_flag': True  # Critical: must set this for context byte to be written
-    }
-
-    return encode_packet(pkt)
-
+def parse_proof(packet, identity_pub, full_packet_hash):
+    signature = packet['data'][:64]
+    return ed25519_validate(identity_pub[32:], signature, full_packet_hash)
