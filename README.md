@@ -15,5 +15,5 @@ Also, check out:
 pytest
 
 # run demo echo-server
-python example_echo.py
+python examples/echobot.py
 ```
